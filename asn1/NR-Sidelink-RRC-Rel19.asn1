@@ -1,0 +1,1033 @@
+NR-Sidelink-RRC-Rel19 DEFINITIONS AUTOMATIC TAGS ::=
+BEGIN
+
+-- NR Sidelink (PC5) RRC configuration IEs from TS 38.331 Rel-19 excerpts.
+-- This file is organized by functional layer and is intended to be practical for
+-- ASN.1 encoder experiments. The compatibility section below supplies the NR
+-- RRC common types/constants that were referenced by the pasted excerpt but
+-- were not included in it.
+
+-- ============================================================================
+-- Encoder entry point
+-- ============================================================================
+
+SL-EncoderInput-r19 ::= CHOICE {
+  sl-PreconfigurationNR-r16       SL-PreconfigurationNR-r16,
+  sl-ConfigDedicatedNR-r16        SL-ConfigDedicatedNR-r16,
+  sl-PHY-MAC-RLC-Config-r16       SL-PHY-MAC-RLC-Config-r16,
+  sl-FreqConfig-r16               SL-FreqConfig-r16,
+  sl-FreqConfigCommon-r16         SL-FreqConfigCommon-r16,
+  sl-BWP-Config-r16               SL-BWP-Config-r16,
+  sl-BWP-ConfigCommon-r16         SL-BWP-ConfigCommon-r16,
+  sl-ResourcePool-r16             SL-ResourcePool-r16,
+  sl-ResourcePoolConfig-r16       SL-ResourcePoolConfig-r16,
+  sl-ConfiguredGrantConfig-r16    SL-ConfiguredGrantConfig-r16,
+  sl-UE-SelectedConfig-r16        SL-UE-SelectedConfig-r16,
+  sl-UE-SelectedConfigRP-r16      SL-UE-SelectedConfigRP-r16,
+  sl-RadioBearerConfig-r16        SL-RadioBearerConfig-r16,
+  sl-SDAP-Config-r16              SL-SDAP-Config-r16,
+  sl-RLC-BearerConfig-r16         SL-RLC-BearerConfig-r16,
+  sl-RLC-ChannelConfig-r17        SL-RLC-ChannelConfig-r17,
+  sl-LogicalChannelConfig-r16     SL-LogicalChannelConfig-r16,
+  sl-QoS-Profile-r16              SL-QoS-Profile-r16,
+  sl-ServingCellInfo-r17          SL-ServingCellInfo-r17
+}
+
+-- ============================================================================
+-- Compatibility support for wider NR-RRC references
+-- ============================================================================
+
+maxNrofRXPool-r16       INTEGER ::= 16
+maxNrofTXPool-r16       INTEGER ::= 16
+maxNrofPoolID-r16       INTEGER ::= 16
+maxNrofSL-BWPs-r16      INTEGER ::= 4
+maxNrofFreqSL-r16       INTEGER ::= 8
+maxPSSCH-TxConfig-r16   INTEGER ::= 8
+maxNrofCG-SL-1-r16      INTEGER ::= 7
+maxNrofSL-QFIs-r16      INTEGER ::= 64
+maxNrofSLRB-r16         INTEGER ::= 32
+maxNrofSL-Dest-r16      INTEGER ::= 32
+maxSL-LCID-r16          INTEGER ::= 32
+maxSL-LCID-Plus1-r18    INTEGER ::= 33
+maxSL-LCID-r18          INTEGER ::= 255
+maxLCG-ID               INTEGER ::= 7
+maxSCSs                 INTEGER ::= 5
+
+BWP-Id ::= INTEGER (0..4)
+
+BWP ::= SEQUENCE {
+  locationAndBandwidth  INTEGER (0..37949),
+  subcarrierSpacing     SubcarrierSpacing,
+  cyclicPrefix          ENUMERATED { extended } OPTIONAL,
+  ...
+}
+
+SubcarrierSpacing ::= ENUMERATED {
+  kHz15, kHz30, kHz60, kHz120, kHz240, spare3, spare2, spare1
+}
+
+SCS-SpecificCarrier ::= SEQUENCE {
+  offsetToCarrier      INTEGER (0..2199),
+  subcarrierSpacing    SubcarrierSpacing,
+  carrierBandwidth     INTEGER (1..275),
+  ...
+}
+
+ARFCN-ValueNR ::= INTEGER (0..3279165)
+PhysCellId ::= INTEGER (0..1007)
+PUCCH-ResourceId ::= INTEGER (0..127)
+SchedulingRequestId ::= INTEGER (0..7)
+
+FilterCoefficient ::= ENUMERATED {
+  fc0, fc1, fc2, fc3, fc4, fc5, fc6, fc7,
+  fc8, fc9, fc11, fc13, fc15, fc17, fc19, spare1
+}
+
+TDD-UL-DL-ConfigCommon ::= SEQUENCE {
+  referenceSubcarrierSpacing  SubcarrierSpacing,
+  pattern1                    TDD-UL-DL-Pattern,
+  pattern2                    TDD-UL-DL-Pattern OPTIONAL,
+  ...
+}
+
+TDD-UL-DL-Pattern ::= SEQUENCE {
+  dl-UL-TransmissionPeriodicity  ENUMERATED {
+    ms0p5, ms0p625, ms1, ms1p25, ms2, ms2p5, ms5, ms10
+  },
+  nrofDownlinkSlots             INTEGER (0..320),
+  nrofDownlinkSymbols           INTEGER (0..13),
+  nrofUplinkSlots               INTEGER (0..320),
+  nrofUplinkSymbols             INTEGER (0..13),
+  ...
+}
+
+AdditionalSpectrumEmission-v1760 ::= INTEGER (0..31)
+SL-CBR-r16 ::= INTEGER (0..100)
+SL-DestinationIndex-r16 ::= INTEGER (1..maxNrofSL-Dest-r16)
+SLRB-Uu-ConfigIndex-r16 ::= INTEGER (1..maxNrofSLRB-r16)
+
+SL-SyncConfigList-r16 ::= SEQUENCE (SIZE (1..16)) OF INTEGER (0..15)
+
+SL-CBR-PriorityTxConfigList-r16 ::=
+  SEQUENCE (SIZE (1..8)) OF SL-CBR-PriorityTxConfig-r16
+
+SL-CBR-PriorityTxConfig-r16 ::= SEQUENCE {
+  sl-Priority-r16  INTEGER (1..8),
+  sl-CBR-r16       SL-CBR-r16,
+  ...
+}
+
+SL-CBR-PriorityTxConfigList-v1650 ::=
+  SEQUENCE (SIZE (1..8)) OF SL-CBR-PriorityTxConfig-v1650
+
+SL-CBR-PriorityTxConfig-v1650 ::= SEQUENCE {
+  sl-Priority-r16  INTEGER (1..8),
+  sl-CBR-r16       SL-CBR-r16,
+  ...
+}
+
+SL-CBR-CommonTxConfigList-r16 ::=
+  SEQUENCE (SIZE (1..8)) OF SL-CBR-CommonTxConfig-r16
+
+SL-CBR-CommonTxConfig-r16 ::= SEQUENCE {
+  sl-Priority-r16  INTEGER (1..8),
+  sl-CBR-r16       SL-CBR-r16,
+  ...
+}
+
+SL-CBR-CommonTxDedicatedSL-PRS-RP-List-r18 ::=
+  SEQUENCE (SIZE (1..8)) OF SL-CBR-CommonTxConfig-r16
+
+SL-ScheduledConfig-r16 ::= SEQUENCE {
+  sl-ConfiguredGrantConfigList-r16
+    SEQUENCE (SIZE (1..8)) OF SL-ConfiguredGrantConfig-r16 OPTIONAL,
+  ...
+}
+
+-- Placeholder wider-NR types not defined in the pasted excerpt.
+SL-BWP-DiscPoolConfig-r17 ::= OCTET STRING
+SL-PRS-PoolConfig-r18 ::= OCTET STRING
+SL-PosBWP-ConfigCommon-r18 ::= OCTET STRING
+SL-Unlicensed-r18 ::= OCTET STRING
+SL-InterUE-CoordinationConfig-r17 ::= OCTET STRING
+SL-PDCP-Config-r16 ::= OCTET STRING
+SL-MeasConfigInfo-r16 ::= OCTET STRING
+SL-MeasConfigCommon-r16 ::= OCTET STRING
+SL-FreqConfigCommonExt-v16k0 ::= OCTET STRING
+
+ARFCN-ValueEUTRA ::= INTEGER (0..262143)
+
+SL-EUTRA-AnchorCarrierFreqList-r16 ::=
+  SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF ARFCN-ValueEUTRA
+
+SL-NR-AnchorCarrierFreqList-r16 ::=
+  SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF ARFCN-ValueNR
+
+SN-FieldLengthAM ::= ENUMERATED { size12, size18 }
+SN-FieldLengthUM ::= ENUMERATED { size6, size12 }
+
+T-PollRetransmit ::= ENUMERATED {
+  ms5, ms10, ms15, ms20, ms25, ms30, ms35, ms40,
+  ms45, ms50, ms55, ms60, ms65, ms70, ms75, ms80,
+  ms85, ms90, ms95, ms100, ms105, ms110, ms115, ms120,
+  ms125, ms130, ms135, ms140, ms145, ms150, ms155, ms160,
+  ms165, ms170, ms175, ms180, ms185, ms190, ms195, ms200,
+  ms205, ms210, ms215, ms220, ms225, ms230, ms235, ms240,
+  ms245, ms250, ms300, ms350, ms400, ms450, ms500, ms800,
+  ms1000, ms2000, ms4000
+}
+
+PollPDU ::= ENUMERATED {
+  p4, p8, p16, p32, p64, p128, p256, p512,
+  p1024, p2048, p4096, p6144, p8192, p12288, p16384, pInfinity
+}
+
+PollByte ::= ENUMERATED {
+  kB25, kB50, kB75, kB100, kB125, kB250, kB375, kB500,
+  kB750, kB1000, kB1250, kB1500, kB2000, kB3000, kB4000,
+  kB4500, kB5000, kB5500, kB6000, kB6500, kB7000, kB7500,
+  mB8, mB9, mB10, mB11, mB12, mB13, mB14, mB15, mB16,
+  mB17, mB18, mB20, mB25, mB30, mB40, infinity
+}
+
+-- Many ASN.1 encoders do not support 3GPP parameterized SetupRelease{T}.
+-- The wrappers below are concrete equivalents used by the IE definitions.
+
+SetupRelease-SL-BWP-PoolConfig-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-BWP-PoolConfig-r16
+}
+
+SetupRelease-SL-BWP-DiscPoolConfig-r17 ::= CHOICE {
+  release  NULL,
+  setup    SL-BWP-DiscPoolConfig-r17
+}
+
+SetupRelease-SL-PRS-PoolConfig-r18 ::= CHOICE {
+  release  NULL,
+  setup    SL-PRS-PoolConfig-r18
+}
+
+SetupRelease-SL-PSBCH-Config-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-PSBCH-Config-r16
+}
+
+SetupRelease-SL-Unlicensed-r18 ::= CHOICE {
+  release  NULL,
+  setup    SL-Unlicensed-r18
+}
+
+SetupRelease-SL-PSCCH-Config-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-PSCCH-Config-r16
+}
+
+SetupRelease-SL-PSSCH-Config-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-PSSCH-Config-r16
+}
+
+SetupRelease-SL-PSFCH-Config-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-PSFCH-Config-r16
+}
+
+SetupRelease-SL-PBPS-CPS-Config-r17 ::= CHOICE {
+  release  NULL,
+  setup    SL-PBPS-CPS-Config-r17
+}
+
+SetupRelease-SL-InterUE-CoordinationConfig-r17 ::= CHOICE {
+  release  NULL,
+  setup    SL-InterUE-CoordinationConfig-r17
+}
+
+SetupRelease-SL-ScheduledConfig-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-ScheduledConfig-r16
+}
+
+SetupRelease-SL-UE-SelectedConfig-r16 ::= CHOICE {
+  release  NULL,
+  setup    SL-UE-SelectedConfig-r16
+}
+
+SetupRelease-SchedulingRequestId ::= CHOICE {
+  release  NULL,
+  setup    SchedulingRequestId
+}
+
+-- ============================================================================
+-- 1. BWP-level configuration
+-- ============================================================================
+
+SL-BWP-Config-r16 ::= SEQUENCE {
+  sl-BWP-Id-r16                   BWP-Id,
+  sl-BWP-Generic-r16              SL-BWP-Generic-r16 OPTIONAL,
+  sl-BWP-PoolConfig-r16           SL-BWP-PoolConfig-r16 OPTIONAL,
+  ...,
+  [[ sl-BWP-PoolConfigPS-r17      SetupRelease-SL-BWP-PoolConfig-r16 OPTIONAL,
+     sl-BWP-DiscPoolConfig-r17    SetupRelease-SL-BWP-DiscPoolConfig-r17 OPTIONAL ]],
+  [[ sl-BWP-PoolConfigA2X-r18     SetupRelease-SL-BWP-PoolConfig-r16 OPTIONAL,
+     sl-BWP-PRS-PoolConfig-r18    SetupRelease-SL-PRS-PoolConfig-r18 OPTIONAL ]]
+}
+
+SL-BWP-Generic-r16 ::= SEQUENCE {
+  sl-BWP-r16                      BWP OPTIONAL,
+  sl-LengthSymbols-r16            ENUMERATED {
+    sym7, sym8, sym9, sym10, sym11, sym12, sym13, sym14
+  } OPTIONAL,
+  sl-StartSymbol-r16              ENUMERATED {
+    sym0, sym1, sym2, sym3, sym4, sym5, sym6, sym7
+  } OPTIONAL,
+  sl-PSBCH-Config-r16             SetupRelease-SL-PSBCH-Config-r16 OPTIONAL,
+  sl-TxDirectCurrentLocation-r16  INTEGER (0..3301) OPTIONAL,
+  ...,
+  [[ sl-Unlicensed-r18            SetupRelease-SL-Unlicensed-r18 OPTIONAL ]]
+}
+
+SL-BWP-ConfigCommon-r16 ::= SEQUENCE {
+  sl-BWP-Generic-r16                  SL-BWP-Generic-r16 OPTIONAL,
+  sl-BWP-PoolConfigCommon-r16         SL-BWP-PoolConfigCommon-r16 OPTIONAL,
+  ...,
+  [[ sl-BWP-PoolConfigCommonPS-r17    SL-BWP-PoolConfigCommon-r16 OPTIONAL,
+     sl-BWP-DiscPoolConfigCommon-r17  SL-BWP-DiscPoolConfigCommon-r17 OPTIONAL ]],
+  [[ sl-BWP-PoolConfigCommonA2X-r18   SL-BWP-PoolConfigCommon-r16 OPTIONAL ]]
+}
+
+SL-BWP-PoolConfig-r16 ::= SEQUENCE {
+  sl-RxPool-r16
+    SEQUENCE (SIZE (1..maxNrofRXPool-r16)) OF SL-ResourcePool-r16 OPTIONAL,
+  sl-TxPoolSelectedNormal-r16  SL-TxPoolDedicated-r16 OPTIONAL,
+  sl-TxPoolScheduling-r16      SL-TxPoolDedicated-r16 OPTIONAL,
+  sl-TxPoolExceptional-r16     SL-ResourcePoolConfig-r16 OPTIONAL
+}
+
+SL-TxPoolDedicated-r16 ::= SEQUENCE {
+  sl-PoolToReleaseList-r16
+    SEQUENCE (SIZE (1..maxNrofTXPool-r16)) OF SL-ResourcePoolID-r16 OPTIONAL,
+  sl-PoolToAddModList-r16
+    SEQUENCE (SIZE (1..maxNrofTXPool-r16)) OF SL-ResourcePoolConfig-r16 OPTIONAL
+}
+
+SL-ResourcePoolConfig-r16 ::= SEQUENCE {
+  sl-ResourcePoolID-r16  SL-ResourcePoolID-r16,
+  sl-ResourcePool-r16    SL-ResourcePool-r16 OPTIONAL
+}
+
+SL-ResourcePoolID-r16 ::= INTEGER (1..maxNrofPoolID-r16)
+
+SL-BWP-PoolConfigCommon-r16 ::= SEQUENCE {
+  sl-RxPool-r16
+    SEQUENCE (SIZE (1..maxNrofRXPool-r16)) OF SL-ResourcePool-r16 OPTIONAL,
+  sl-TxPoolSelectedNormal-r16
+    SEQUENCE (SIZE (1..maxNrofTXPool-r16)) OF SL-ResourcePoolConfig-r16 OPTIONAL,
+  sl-TxPoolExceptional-r16  SL-ResourcePoolConfig-r16 OPTIONAL
+}
+
+SL-BWP-DiscPoolConfigCommon-r17 ::= OCTET STRING
+
+-- ============================================================================
+-- 2. Resource pool internals
+-- ============================================================================
+
+SL-ResourcePool-r16 ::= SEQUENCE {
+  sl-PSCCH-Config-r16               SetupRelease-SL-PSCCH-Config-r16 OPTIONAL,
+  sl-PSSCH-Config-r16               SetupRelease-SL-PSSCH-Config-r16 OPTIONAL,
+  sl-PSFCH-Config-r16               SetupRelease-SL-PSFCH-Config-r16 OPTIONAL,
+  sl-SyncAllowed-r16                SL-SyncAllowed-r16 OPTIONAL,
+  sl-SubchannelSize-r16             ENUMERATED {
+    n10, n12, n15, n20, n25, n50, n75, n100
+  } OPTIONAL,
+  dummy                             INTEGER (10..160) OPTIONAL,
+  sl-StartRB-Subchannel-r16         INTEGER (0..265) OPTIONAL,
+  sl-NumSubchannel-r16              INTEGER (1..27) OPTIONAL,
+  sl-Additional-MCS-Table-r16       ENUMERATED {
+    qam256, qam64LowSE, qam256-qam64LowSE
+  } OPTIONAL,
+  sl-ThreshS-RSSI-CBR-r16           INTEGER (0..45) OPTIONAL,
+  sl-TimeWindowSizeCBR-r16          ENUMERATED { ms100, slot100 } OPTIONAL,
+  sl-TimeWindowSizeCR-r16           ENUMERATED { ms1000, slot1000 } OPTIONAL,
+  sl-PTRS-Config-r16                SL-PTRS-Config-r16 OPTIONAL,
+  sl-UE-SelectedConfigRP-r16        SL-UE-SelectedConfigRP-r16 OPTIONAL,
+  sl-RxParametersNcell-r16          SEQUENCE {
+    sl-TDD-Configuration-r16        TDD-UL-DL-ConfigCommon OPTIONAL,
+    sl-SyncConfigIndex-r16          INTEGER (0..15)
+  } OPTIONAL,
+  sl-ZoneConfigMCR-List-r16
+    SEQUENCE (SIZE (16)) OF SL-ZoneConfigMCR-r16 OPTIONAL,
+  sl-FilterCoefficient-r16          FilterCoefficient OPTIONAL,
+  sl-RB-Number-r16                  INTEGER (10..275) OPTIONAL,
+  sl-PreemptionEnable-r16           ENUMERATED {
+    enabled, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8
+  } OPTIONAL,
+  sl-PriorityThreshold-UL-URLLC-r16 INTEGER (1..9) OPTIONAL,
+  sl-PriorityThreshold-r16          INTEGER (1..9) OPTIONAL,
+  sl-X-Overhead-r16                 ENUMERATED { n0, n3, n6, n9 } OPTIONAL,
+  sl-PowerControl-r16               SL-PowerControl-r16 OPTIONAL,
+  sl-TxPercentageList-r16           SL-TxPercentageList-r16 OPTIONAL,
+  sl-MinMaxMCS-List-r16             SL-MinMaxMCS-List-r16 OPTIONAL,
+  ...,
+  [[ sl-TimeResource-r16            BIT STRING (SIZE (10..160)) OPTIONAL ]],
+  [[ sl-PBPS-CPS-Config-r17
+       SetupRelease-SL-PBPS-CPS-Config-r17 OPTIONAL,
+     sl-InterUE-CoordinationConfig-r17
+       SetupRelease-SL-InterUE-CoordinationConfig-r17 OPTIONAL ]],
+  [[ sl-CPE-StartingPositionsPSCCH-PSSCH-InitiateCOT-List-r18
+       SL-CPE-StartingPositionsPSCCH-PSSCH-List-r18 OPTIONAL,
+     sl-CPE-StartingPositionsPSCCH-PSSCH-InitiateCOT-Default-r18
+       SEQUENCE (SIZE (1..9)) OF INTEGER (1..9) OPTIONAL,
+     sl-CPE-StartingPositionsPSCCH-PSSCH-WithinCOT-List-r18
+       SL-CPE-StartingPositionsPSCCH-PSSCH-List-r18 OPTIONAL,
+     sl-CPE-StartingPositionsPSCCH-PSSCH-WithinCOT-Default-r18
+       SEQUENCE (SIZE (1..9)) OF INTEGER (1..9) OPTIONAL,
+     sl-CPE-StartingPositionPSFCH-r18 INTEGER (1..9) OPTIONAL,
+     sl-Type1-LBT-BlockingOption1-r18 ENUMERATED { enabled } OPTIONAL,
+     sl-Type1-LBT-BlockingOption2-r18 ENUMERATED { enabled } OPTIONAL,
+     sl-NumInterlacePerSubchannel-r18 INTEGER (1..16) OPTIONAL,
+     sl-NumReferencePRBs-OfInterlace-r18 INTEGER (1..275) OPTIONAL,
+     sl-TransmissionStructureForPSFCH-r18
+       ENUMERATED { commonInterlace, dedicatedInterlace } OPTIONAL,
+     sl-NumDedicatedPRBs-ForPSFCH-r18 INTEGER (1..275) OPTIONAL,
+     sl-NumPSFCH-Occasions-r18 INTEGER (1..16) OPTIONAL,
+     sl-PSFCH-CommonInterlaceIndex-r18 INTEGER (0..15) OPTIONAL,
+     sl-NumRefSymbolLength-r18 INTEGER (1..14) OPTIONAL,
+     sl-PSFCH-RB-SetList-r18
+       SEQUENCE (SIZE (1..8)) OF BIT STRING (SIZE (10..275)) OPTIONAL,
+     sl-PSFCH-PowerOffset-r18 INTEGER (-30..30) OPTIONAL,
+     sl-IUC-RB-SetList-r18
+       SEQUENCE (SIZE (1..8)) OF BIT STRING (SIZE (10..275)) OPTIONAL,
+     sl-RBSetIndexOfResourcePool-r18 INTEGER (0..4) OPTIONAL,
+     sl-A2X-Service-r18 ENUMERATED { brid, daa, bridAndDAA } OPTIONAL,
+     sl-PRS-ResourcesSharedSL-PRS-RP-r18
+       SEQUENCE (SIZE (1..16)) OF SL-PRS-ResourceSharedSL-PRS-RP-r18 OPTIONAL,
+     numSym-SL-PRS-2ndStageSCI-r18 INTEGER (1..9) OPTIONAL,
+     sl-SCI-basedSL-PRS-TxTriggerSCI2-D-r18 ENUMERATED { enabled } OPTIONAL ]]
+}
+
+SL-PSCCH-Config-r16 ::= SEQUENCE {
+  sl-TimeResourcePSCCH-r16  ENUMERATED { n2, n3 } OPTIONAL,
+  sl-FreqResourcePSCCH-r16  ENUMERATED { n10, n12, n15, n20, n25 } OPTIONAL,
+  sl-DMRS-ScrambleID-r16    INTEGER (0..65535) OPTIONAL,
+  sl-NumReservedBits-r16    INTEGER (2..4) OPTIONAL,
+  ...
+}
+
+SL-PSSCH-Config-r16 ::= SEQUENCE {
+  sl-PSSCH-DMRS-TimePatternList-r16
+    SEQUENCE (SIZE (1..3)) OF INTEGER (2..4) OPTIONAL,
+  sl-BetaOffsets2ndSCI-r16
+    SEQUENCE (SIZE (4)) OF SL-BetaOffsets-r16 OPTIONAL,
+  sl-Scaling-r16  ENUMERATED { f0p5, f0p65, f0p8, f1 } OPTIONAL,
+  ...
+}
+
+SL-BetaOffsets-r16 ::= INTEGER (0..31)
+
+SL-PSFCH-Config-r16 ::= SEQUENCE {
+  sl-PSFCH-Period-r16                 ENUMERATED { sl0, sl1, sl2, sl4 } OPTIONAL,
+  sl-PSFCH-RB-Set-r16                 BIT STRING (SIZE (10..275)) OPTIONAL,
+  sl-NumMuxCS-Pair-r16                ENUMERATED { n1, n2, n3, n6 } OPTIONAL,
+  sl-MinTimeGapPSFCH-r16              ENUMERATED { sl2, sl3 } OPTIONAL,
+  sl-PSFCH-HopID-r16                  INTEGER (0..1023) OPTIONAL,
+  sl-PSFCH-CandidateResourceType-r16  ENUMERATED {
+    startSubCH, allocSubCH
+  } OPTIONAL,
+  ...
+}
+
+SL-CPE-StartingPositionsPSCCH-PSSCH-List-r18 ::=
+  SEQUENCE (SIZE (8)) OF SL-CPE-StartingPositionsPSCCH-PSSCH-r18
+
+SL-CPE-StartingPositionsPSCCH-PSSCH-r18 ::= SEQUENCE {
+  sl-Priority-r18                 INTEGER (1..8),
+  sl-CPE-StartingPositions-r18    SEQUENCE (SIZE (1..9)) OF INTEGER (1..9)
+}
+
+SL-PRS-ResourceSharedSL-PRS-RP-r18 ::= SEQUENCE {
+  sl-PRS-ResourceID-r18             INTEGER (0..16),
+  mNumberOfSymbols-r18              INTEGER (1..9),
+  sl-PRS-CombSizeN-AndReOffset-r18  CHOICE {
+    n2-r18  INTEGER (0..1),
+    n4-r18  INTEGER (0..3),
+    dummy1  INTEGER (0..5),
+    ...
+  } OPTIONAL
+}
+
+SL-ZoneConfigMCR-r16 ::= SEQUENCE {
+  sl-ZoneConfigMCR-Index-r16  INTEGER (0..15),
+  sl-TransRange-r16           SL-TransRange-r16 OPTIONAL,
+  sl-ZoneConfig-r16           SL-ZoneConfig-r16 OPTIONAL,
+  ...
+}
+
+SL-TransRange-r16 ::= ENUMERATED {
+  m20, m50, m80, m100, m120, m150, m180, m200, m250,
+  m300, m350, m400, m450, m500, m550, m600, m700, m1000,
+  spare9, spare8, spare7, spare6, spare5, spare4, spare3, spare2, spare1
+}
+
+SL-ZoneConfig-r16 ::= SEQUENCE {
+  sl-ZoneLength-r16  ENUMERATED {
+    m5, m10, m20, m30, m40, m50, spare2, spare1
+  },
+  ...
+}
+
+SL-SyncAllowed-r16 ::= SEQUENCE {
+  gnss-Sync-r16    ENUMERATED { true } OPTIONAL,
+  gnbEnb-Sync-r16  ENUMERATED { true } OPTIONAL,
+  ue-Sync-r16      ENUMERATED { true } OPTIONAL
+}
+
+SL-PTRS-Config-r16 ::= SEQUENCE {
+  sl-PTRS-FreqDensity-r16  SEQUENCE (SIZE (2)) OF INTEGER (1..276) OPTIONAL,
+  sl-PTRS-TimeDensity-r16  SEQUENCE (SIZE (3)) OF INTEGER (0..29) OPTIONAL,
+  sl-PTRS-RE-Offset-r16    ENUMERATED { offset01, offset10, offset11 } OPTIONAL,
+  ...
+}
+
+-- ============================================================================
+-- 3. Mode-2 autonomous resource selection
+-- ============================================================================
+
+SL-UE-SelectedConfigRP-r16 ::= SEQUENCE {
+  sl-CBR-PriorityTxConfigList-r16
+    SL-CBR-PriorityTxConfigList-r16 OPTIONAL,
+  sl-Thres-RSRP-List-r16
+    SL-Thres-RSRP-List-r16 OPTIONAL,
+  sl-MultiReserveResource-r16
+    ENUMERATED { enabled } OPTIONAL,
+  sl-MaxNumPerReserve-r16
+    ENUMERATED { n2, n3 } OPTIONAL,
+  sl-SensingWindow-r16
+    ENUMERATED { ms100, ms1100 } OPTIONAL,
+  sl-SelectionWindowList-r16
+    SL-SelectionWindowList-r16 OPTIONAL,
+  sl-ResourceReservePeriodList-r16
+    SEQUENCE (SIZE (1..16)) OF SL-ResourceReservePeriod-r16 OPTIONAL,
+  sl-RS-ForSensing-r16
+    ENUMERATED { pscch, pssch },
+  ...,
+  [[ sl-CBR-PriorityTxConfigList-v1650
+       SL-CBR-PriorityTxConfigList-v1650 OPTIONAL ]],
+  [[ sl-NRPSSCH-EUTRA-ThresRSRP-List-r18
+       SL-Thres-RSRP-List-r16 OPTIONAL,
+     sl-NRPSFCH-EUTRA-ThresRSRP-List-r18
+       SL-Thres-RSRP-List-r16 OPTIONAL ]]
+}
+
+SL-ResourceReservePeriod-r16 ::= CHOICE {
+  sl-ResourceReservePeriod1-r16  ENUMERATED {
+    ms0, ms100, ms200, ms300, ms400, ms500,
+    ms600, ms700, ms800, ms900, ms1000
+  },
+  sl-ResourceReservePeriod2-r16  INTEGER (1..99)
+}
+
+SL-SelectionWindowList-r16 ::=
+  SEQUENCE (SIZE (8)) OF SL-SelectionWindowConfig-r16
+
+SL-SelectionWindowConfig-r16 ::= SEQUENCE {
+  sl-Priority-r16         INTEGER (1..8),
+  sl-SelectionWindow-r16  ENUMERATED { n1, n5, n10, n20 }
+}
+
+SL-TxPercentageList-r16 ::= SEQUENCE (SIZE (8)) OF SL-TxPercentageConfig-r16
+
+SL-TxPercentageConfig-r16 ::= SEQUENCE {
+  sl-Priority-r16      INTEGER (1..8),
+  sl-TxPercentage-r16  ENUMERATED { p20, p35, p50 }
+}
+
+SL-MinMaxMCS-List-r16 ::= SEQUENCE (SIZE (1..3)) OF SL-MinMaxMCS-Config-r16
+
+SL-MinMaxMCS-Config-r16 ::= SEQUENCE {
+  sl-MCS-Table-r16     ENUMERATED { qam64, qam256, qam64LowSE },
+  sl-MinMCS-PSSCH-r16  INTEGER (0..27),
+  sl-MaxMCS-PSSCH-r16  INTEGER (0..31)
+}
+
+SL-UE-SelectedConfig-r16 ::= SEQUENCE {
+  sl-PSSCH-TxConfigList-r16      SL-PSSCH-TxConfigList-r16 OPTIONAL,
+  sl-ProbResourceKeep-r16        ENUMERATED {
+    v0, v0dot2, v0dot4, v0dot6, v0dot8
+  } OPTIONAL,
+  sl-ReselectAfter-r16           ENUMERATED {
+    n1, n2, n3, n4, n5, n6, n7, n8, n9
+  } OPTIONAL,
+  sl-CBR-CommonTxConfigList-r16  SL-CBR-CommonTxConfigList-r16 OPTIONAL,
+  ul-PrioritizationThres-r16     INTEGER (1..16) OPTIONAL,
+  sl-PrioritizationThres-r16     INTEGER (1..8) OPTIONAL,
+  ...,
+  [[ sl-CBR-CommonTxDedicatedSL-PRS-RP-List-r18
+       SL-CBR-CommonTxDedicatedSL-PRS-RP-List-r18 OPTIONAL ]]
+}
+
+SL-PSSCH-TxConfigList-r16 ::=
+  SEQUENCE (SIZE (1..maxPSSCH-TxConfig-r16)) OF SL-PSSCH-TxConfig-r16
+
+SL-PSSCH-TxConfig-r16 ::= SEQUENCE {
+  sl-TypeTxSync-r16            SL-TypeTxSync-r16 OPTIONAL,
+  sl-ThresUE-Speed-r16         ENUMERATED {
+    kmph60, kmph80, kmph100, kmph120, kmph140, kmph160, kmph180, kmph200
+  },
+  sl-ParametersAboveThres-r16  SL-PSSCH-TxParameters-r16,
+  sl-ParametersBelowThres-r16  SL-PSSCH-TxParameters-r16,
+  ...,
+  [[ sl-ParametersAboveThres-v1650  SL-MinMaxMCS-List-r16 OPTIONAL,
+     sl-ParametersBelowThres-v1650  SL-MinMaxMCS-List-r16 OPTIONAL ]]
+}
+
+SL-PSSCH-TxParameters-r16 ::= SEQUENCE {
+  sl-MinMCS-PSSCH-r16           INTEGER (0..27),
+  sl-MaxMCS-PSSCH-r16           INTEGER (0..31),
+  sl-MinSubChannelNumPSSCH-r16  INTEGER (1..27),
+  sl-MaxSubchannelNumPSSCH-r16  INTEGER (1..27),
+  sl-MaxTxTransNumPSSCH-r16     INTEGER (1..32),
+  sl-MaxTxPower-r16             SL-TxPower-r16 OPTIONAL
+}
+
+SL-TypeTxSync-r16 ::= ENUMERATED { gnss, gnbEnb, ue }
+
+SL-PBPS-CPS-Config-r17 ::= SEQUENCE {
+  sl-AllowedResourceSelectionConfig-r17  ENUMERATED {
+    c1, c2, c3, c4, c5, c6, c7
+  } OPTIONAL,
+  sl-MinNumCandidateSlotsPeriodic-r17    INTEGER (1..32) OPTIONAL,
+  sl-PBPS-OccasionReservePeriodList-r17
+    SEQUENCE (SIZE (1..16)) OF INTEGER (1..16) OPTIONAL,
+  sl-Additional-PBPS-Occasion-r17        ENUMERATED { monitored } OPTIONAL,
+  sl-CPS-WindowPeriodic-r17              INTEGER (5..30) OPTIONAL,
+  sl-MinNumCandidateSlotsAperiodic-r17   INTEGER (1..32) OPTIONAL,
+  sl-MinNumRssiMeasurementSlots-r17      INTEGER (1..800) OPTIONAL,
+  sl-DefaultCBR-RandomSelection-r17      INTEGER (0..100) OPTIONAL,
+  sl-DefaultCBR-PartialSensing-r17       INTEGER (0..100) OPTIONAL,
+  sl-CPS-WindowAperiodic-r17             INTEGER (0..30) OPTIONAL,
+  sl-PartialSensingInactiveTime-r17      ENUMERATED {
+    enabled, disabled
+  } OPTIONAL,
+  ...
+}
+
+SL-Thres-RSRP-List-r16 ::= SEQUENCE (SIZE (64)) OF SL-Thres-RSRP-r16
+SL-Thres-RSRP-r16 ::= INTEGER (0..66)
+
+-- ============================================================================
+-- 4. Mode-1 scheduled grants
+-- ============================================================================
+
+SL-ConfiguredGrantConfig-r16 ::= SEQUENCE {
+  sl-ConfigIndexCG-r16             SL-ConfigIndexCG-r16,
+  sl-PeriodCG-r16                  SL-PeriodCG-r16 OPTIONAL,
+  sl-NrOfHARQ-Processes-r16        INTEGER (1..16) OPTIONAL,
+  sl-HARQ-ProcID-offset-r16        INTEGER (0..15) OPTIONAL,
+  sl-CG-MaxTransNumList-r16        SL-CG-MaxTransNumList-r16 OPTIONAL,
+  rrc-ConfiguredSidelinkGrant-r16  SEQUENCE {
+    sl-TimeResourceCG-Type1-r16     INTEGER (0..496) OPTIONAL,
+    sl-StartSubchannelCG-Type1-r16  INTEGER (0..26) OPTIONAL,
+    sl-FreqResourceCG-Type1-r16     INTEGER (0..6929) OPTIONAL,
+    sl-TimeOffsetCG-Type1-r16       INTEGER (0..7999) OPTIONAL,
+    sl-N1PUCCH-AN-r16               PUCCH-ResourceId OPTIONAL,
+    sl-PSFCH-ToPUCCH-CG-Type1-r16   INTEGER (0..15) OPTIONAL,
+    sl-ResourcePoolID-r16           SL-ResourcePoolID-r16 OPTIONAL,
+    sl-TimeReferenceSFN-Type1-r16   ENUMERATED { sfn512 } OPTIONAL
+  },
+  ...,
+  [[ sl-N1PUCCH-AN-Type2-r16  PUCCH-ResourceId OPTIONAL ]],
+  [[ sl-StartRBsetCG-Type1-r18 INTEGER (0..4) OPTIONAL ]]
+}
+
+SL-ConfigIndexCG-r16 ::= INTEGER (0..maxNrofCG-SL-1-r16)
+
+SL-CG-MaxTransNumList-r16 ::= SEQUENCE (SIZE (1..8)) OF SL-CG-MaxTransNum-r16
+
+SL-CG-MaxTransNum-r16 ::= SEQUENCE {
+  sl-Priority-r16     INTEGER (1..8),
+  sl-MaxTransNum-r16  INTEGER (1..32)
+}
+
+SL-PeriodCG-r16 ::= CHOICE {
+  sl-PeriodCG1-r16  ENUMERATED {
+    ms100, ms200, ms300, ms400, ms500, ms600,
+    ms700, ms800, ms900, ms1000, spare6, spare5,
+    spare4, spare3, spare2, spare1
+  },
+  sl-PeriodCG2-r16  INTEGER (1..99)
+}
+
+-- ============================================================================
+-- 5. Carrier and frequency configuration
+-- ============================================================================
+
+SL-FreqConfig-r16 ::= SEQUENCE {
+  sl-Freq-Id-r16                  SL-Freq-Id-r16,
+  sl-SCS-SpecificCarrierList-r16  SEQUENCE (SIZE (1..maxSCSs)) OF
+                                    SCS-SpecificCarrier,
+  sl-AbsoluteFrequencyPointA-r16  ARFCN-ValueNR OPTIONAL,
+  sl-AbsoluteFrequencySSB-r16     ARFCN-ValueNR OPTIONAL,
+  frequencyShift7p5khzSL-r16      ENUMERATED { true } OPTIONAL,
+  valueN-r16                      INTEGER (-1..1),
+  sl-BWP-ToReleaseList-r16        SEQUENCE (SIZE (1..maxNrofSL-BWPs-r16)) OF
+                                    BWP-Id OPTIONAL,
+  sl-BWP-ToAddModList-r16         SEQUENCE (SIZE (1..maxNrofSL-BWPs-r16)) OF
+                                    SL-BWP-Config-r16 OPTIONAL,
+  sl-SyncConfigList-r16           SL-SyncConfigList-r16 OPTIONAL,
+  sl-SyncPriority-r16             ENUMERATED { gnss, gnbEnb } OPTIONAL
+}
+
+SL-Freq-Id-r16 ::= INTEGER (1..maxNrofFreqSL-r16)
+
+SL-FreqConfigCommon-r16 ::= SEQUENCE {
+  sl-SCS-SpecificCarrierList-r16  SEQUENCE (SIZE (1..maxSCSs)) OF
+                                    SCS-SpecificCarrier,
+  sl-AbsoluteFrequencyPointA-r16  ARFCN-ValueNR,
+  sl-AbsoluteFrequencySSB-r16     ARFCN-ValueNR OPTIONAL,
+  frequencyShift7p5khzSL-r16      ENUMERATED { true } OPTIONAL,
+  valueN-r16                      INTEGER (-1..1),
+  sl-BWP-List-r16                 SEQUENCE (SIZE (1..maxNrofSL-BWPs-r16)) OF
+                                    SL-BWP-ConfigCommon-r16 OPTIONAL,
+  sl-SyncPriority-r16             ENUMERATED { gnss, gnbEnb } OPTIONAL,
+  sl-NbAsSync-r16                 BOOLEAN OPTIONAL,
+  sl-SyncConfigList-r16           SL-SyncConfigList-r16 OPTIONAL,
+  ...,
+  [[ sl-UnlicensedFreqConfigCommon-r18  SEQUENCE {
+       absenceOfAnyOtherTechnology-r18
+         ENUMERATED { true } OPTIONAL,
+       sl-FreqSelectionConfigList-r18
+         SEQUENCE (SIZE (1..8)) OF SL-FreqSelectionConfig-r18 OPTIONAL,
+       sl-SyncTxDisabled-r18
+         ENUMERATED { true } OPTIONAL,
+       sl-EnergyDetectionConfig-r18 CHOICE {
+         sl-MaxEnergyDetectionThreshold-r18     INTEGER (-85..-52),
+         sl-EnergyDetectionThresholdOffset-r18  INTEGER (-13..20)
+       } OPTIONAL,
+       ue-ToUE-COT-SharingED-Threshold-r18
+         INTEGER (-85..-52) OPTIONAL,
+       harq-ACK-FeedbackRatioforCW-AdjustmentGC-Option2-r18
+         INTEGER (10..100) OPTIONAL
+     } OPTIONAL,
+     sl-PosBWP-List-r18  SEQUENCE (SIZE (1..maxNrofSL-BWPs-r16)) OF
+                           SL-PosBWP-ConfigCommon-r18 OPTIONAL ]],
+  [[ additionalSpectrumEmission-v1860
+       AdditionalSpectrumEmission-v1760 OPTIONAL ]]
+}
+
+SL-FreqSelectionConfig-r18 ::= SEQUENCE {
+  sl-priorityList-r18               SEQUENCE (SIZE (1..8)) OF INTEGER (1..8),
+  sl-threshCBR-FreqReselection-r18  SL-CBR-r16,
+  sl-threshCBR-FreqKeeping-r18      SL-CBR-r16
+}
+
+-- ============================================================================
+-- 6. PSBCH and sync-reference power control
+-- ============================================================================
+
+SL-PSBCH-Config-r16 ::= SEQUENCE {
+  dl-P0-PSBCH-r16     INTEGER (-16..15) OPTIONAL,
+  dl-Alpha-PSBCH-r16  SL-Alpha-r16 OPTIONAL,
+  ...,
+  [[ dl-P0-PSBCH-r17  INTEGER (-202..24) OPTIONAL ]]
+}
+
+-- ============================================================================
+-- 7. Power control
+-- ============================================================================
+
+SL-PowerControl-r16 ::= SEQUENCE {
+  sl-MaxTransPower-r16        INTEGER (-30..33),
+  sl-Alpha-PSSCH-PSCCH-r16    SL-Alpha-r16 OPTIONAL,
+  dl-Alpha-PSSCH-PSCCH-r16    SL-Alpha-r16 OPTIONAL,
+  sl-P0-PSSCH-PSCCH-r16       INTEGER (-16..15) OPTIONAL,
+  dl-P0-PSSCH-PSCCH-r16       INTEGER (-16..15) OPTIONAL,
+  dl-Alpha-PSFCH-r16          SL-Alpha-r16 OPTIONAL,
+  dl-P0-PSFCH-r16             INTEGER (-16..15) OPTIONAL,
+  ...,
+  [[ dl-P0-PSSCH-PSCCH-r17    INTEGER (-202..24) OPTIONAL,
+     sl-P0-PSSCH-PSCCH-r17    INTEGER (-202..24) OPTIONAL,
+     dl-P0-PSFCH-r17          INTEGER (-202..24) OPTIONAL ]]
+}
+
+SL-Alpha-r16 ::= ENUMERATED {
+  alpha0, alpha04, alpha05, alpha06, alpha07, alpha08, alpha09, alpha1
+}
+
+SL-TxPower-r16 ::= CHOICE {
+  minusinfinity-r16  NULL,
+  txPower-r16        INTEGER (-30..33)
+}
+
+-- ============================================================================
+-- 8. QoS mapping
+-- ============================================================================
+
+SL-QoS-FlowIdentity-r16 ::= INTEGER (1..maxNrofSL-QFIs-r16)
+
+SL-QoS-Profile-r16 ::= SEQUENCE {
+  sl-PQI-r16    SL-PQI-r16 OPTIONAL,
+  sl-GFBR-r16   INTEGER (0..4000000000) OPTIONAL,
+  sl-MFBR-r16   INTEGER (0..4000000000) OPTIONAL,
+  sl-Range-r16  INTEGER (1..1000) OPTIONAL,
+  ...
+}
+
+SL-PQI-r16 ::= CHOICE {
+  sl-StandardizedPQI-r16      INTEGER (0..255),
+  sl-Non-StandardizedPQI-r16  SEQUENCE {
+    sl-ResourceType-r16        ENUMERATED {
+      gbr, non-GBR, delayCriticalGBR, spare1
+    } OPTIONAL,
+    sl-PriorityLevel-r16       INTEGER (1..8) OPTIONAL,
+    sl-PacketDelayBudget-r16   INTEGER (0..1023) OPTIONAL,
+    sl-PacketErrorRate-r16     INTEGER (0..9) OPTIONAL,
+    sl-AveragingWindow-r16     INTEGER (0..4095) OPTIONAL,
+    sl-MaxDataBurstVolume-r16  INTEGER (0..4095) OPTIONAL,
+    ...
+  }
+}
+
+SL-SDAP-Config-r16 ::= SEQUENCE {
+  sl-SDAP-Header-r16      ENUMERATED { present, absent },
+  sl-DefaultRB-r16        BOOLEAN,
+  sl-MappedQoS-Flows-r16  CHOICE {
+    sl-MappedQoS-FlowsList-r16
+      SEQUENCE (SIZE (1..maxNrofSL-QFIs-r16)) OF SL-QoS-Profile-r16,
+    sl-MappedQoS-FlowsListDedicated-r16
+      SL-MappedQoS-FlowsListDedicated-r16
+  } OPTIONAL,
+  sl-CastType-r16         ENUMERATED {
+    broadcast, groupcast, unicast, spare1
+  } OPTIONAL,
+  ...
+}
+
+SL-MappedQoS-FlowsListDedicated-r16 ::= SEQUENCE {
+  sl-MappedQoS-FlowsToAddList-r16
+    SEQUENCE (SIZE (1..maxNrofSL-QFIs-r16)) OF SL-QoS-FlowIdentity-r16
+      OPTIONAL,
+  sl-MappedQoS-FlowsToReleaseList-r16
+    SEQUENCE (SIZE (1..maxNrofSL-QFIs-r16)) OF SL-QoS-FlowIdentity-r16
+      OPTIONAL
+}
+
+-- ============================================================================
+-- 9. Radio bearer, RLC, and MAC logical-channel configuration
+-- ============================================================================
+
+SL-RadioBearerConfig-r16 ::= SEQUENCE {
+  slrb-Uu-ConfigIndex-r16  SLRB-Uu-ConfigIndex-r16,
+  sl-SDAP-Config-r16       SL-SDAP-Config-r16 OPTIONAL,
+  sl-PDCP-Config-r16       SL-PDCP-Config-r16 OPTIONAL,
+  sl-TransRange-r16        SL-TransRange-r16 OPTIONAL,
+  ...
+}
+
+SL-RBSetConfig-r18 ::= SEQUENCE {
+  sl-RBSetIndex-r18                INTEGER (0..4),
+  sl-NumOfSSSBRepetition-r18       INTEGER (2..9) OPTIONAL,
+  sl-GapBetweenSSSBRepetition-r18  INTEGER (1..84) OPTIONAL
+}
+
+SL-RLC-BearerConfig-r16 ::= SEQUENCE {
+  sl-RLC-BearerConfigIndex-r16     SL-RLC-BearerConfigIndex-r16,
+  sl-ServedRadioBearer-r16         SLRB-Uu-ConfigIndex-r16 OPTIONAL,
+  sl-RLC-Config-r16                SL-RLC-Config-r16 OPTIONAL,
+  sl-MAC-LogicalChannelConfig-r16  SL-LogicalChannelConfig-r16 OPTIONAL,
+  ...,
+  [[ sl-RLC-BearerConfigIndex-v1800
+       SL-RLC-BearerConfigIndex-v1800 OPTIONAL ]]
+}
+
+SL-RLC-BearerConfigIndex-r16 ::= INTEGER (1..maxSL-LCID-r16)
+SL-RLC-BearerConfigIndex-v1800 ::=
+  INTEGER (maxSL-LCID-Plus1-r18..maxSL-LCID-r18)
+
+SL-RLC-ChannelConfig-r17 ::= SEQUENCE {
+  sl-RLC-ChannelID-r17             SL-RLC-ChannelID-r17,
+  sl-RLC-Config-r17                SL-RLC-Config-r16 OPTIONAL,
+  sl-MAC-LogicalChannelConfig-r17  SL-LogicalChannelConfig-r16 OPTIONAL,
+  sl-PacketDelayBudget-r17         INTEGER (0..1023) OPTIONAL,
+  ...
+}
+
+SL-RLC-ChannelID-r17 ::= INTEGER (1..maxSL-LCID-r16)
+
+SL-RLC-Config-r16 ::= CHOICE {
+  sl-AM-RLC-r16  SEQUENCE {
+    sl-SN-FieldLengthAM-r16  SN-FieldLengthAM OPTIONAL,
+    sl-T-PollRetransmit-r16  T-PollRetransmit,
+    sl-PollPDU-r16           PollPDU,
+    sl-PollByte-r16          PollByte,
+    sl-MaxRetxThreshold-r16  ENUMERATED {
+      t1, t2, t3, t4, t6, t8, t16, t32
+    },
+    ...
+  },
+  sl-UM-RLC-r16  SEQUENCE {
+    sl-SN-FieldLengthUM-r16  SN-FieldLengthUM OPTIONAL,
+    ...
+  },
+  ...
+}
+
+SL-LogicalChannelConfig-r16 ::= SEQUENCE {
+  sl-Priority-r16                     INTEGER (1..8),
+  sl-PrioritisedBitRate-r16           ENUMERATED {
+    kBps0, kBps8, kBps16, kBps32, kBps64, kBps128,
+    kBps256, kBps512, kBps1024, kBps2048, kBps4096,
+    kBps8192, kBps16384, kBps32768, kBps65536, infinity
+  },
+  sl-BucketSizeDuration-r16           ENUMERATED {
+    ms5, ms10, ms20, ms50, ms100, ms150, ms300,
+    ms500, ms1000, spare7, spare6, spare5, spare4,
+    spare3, spare2, spare1
+  },
+  sl-ConfiguredGrantType1Allowed-r16  ENUMERATED { true } OPTIONAL,
+  sl-HARQ-FeedbackEnabled-r16         ENUMERATED {
+    enabled, disabled
+  } OPTIONAL,
+  sl-AllowedCG-List-r16               SEQUENCE (SIZE (0..maxNrofCG-SL-1-r16)) OF
+                                        SL-ConfigIndexCG-r16 OPTIONAL,
+  sl-AllowedSCS-List-r16              SEQUENCE (SIZE (1..maxSCSs)) OF
+                                        SubcarrierSpacing OPTIONAL,
+  sl-MaxPUSCH-Duration-r16            ENUMERATED {
+    ms0p02, ms0p04, ms0p0625, ms0p125, ms0p25, ms0p5,
+    spare2, spare1
+  } OPTIONAL,
+  sl-LogicalChannelGroup-r16          INTEGER (0..maxLCG-ID) OPTIONAL,
+  sl-SchedulingRequestId-r16          SchedulingRequestId OPTIONAL,
+  sl-LogicalChannelSR-DelayTimerApplied-r16
+                                        BOOLEAN OPTIONAL,
+  ...,
+  [[ sl-ChannelAccessPriority-r18     INTEGER (1..4) OPTIONAL,
+     sl-AllowedCarriers-r18           SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF
+                                        INTEGER (1..maxNrofFreqSL-r16) OPTIONAL ]]
+}
+
+-- ============================================================================
+-- 10. Identities
+-- ============================================================================
+
+SL-DestinationIdentity-r16 ::= BIT STRING (SIZE (24))
+SL-SourceIdentity-r17 ::= BIT STRING (SIZE (24))
+
+SL-ServingCellInfo-r17 ::= SEQUENCE {
+  sl-PhysCellId-r17     PhysCellId,
+  sl-CarrierFreqNR-r17  ARFCN-ValueNR
+}
+
+-- ============================================================================
+-- 11. Dedicated sidelink configuration container
+-- ============================================================================
+
+SL-ConfigDedicatedNR-r16 ::= SEQUENCE {
+  sl-PHY-MAC-RLC-Config-r16          SL-PHY-MAC-RLC-Config-r16 OPTIONAL,
+  sl-RadioBearerToReleaseList-r16    SEQUENCE (SIZE (1..maxNrofSLRB-r16)) OF
+                                        SLRB-Uu-ConfigIndex-r16 OPTIONAL,
+  sl-RadioBearerToAddModList-r16     SEQUENCE (SIZE (1..maxNrofSLRB-r16)) OF
+                                        SL-RadioBearerConfig-r16 OPTIONAL,
+  sl-MeasConfigInfoToReleaseList-r16 SEQUENCE (SIZE (1..maxNrofSL-Dest-r16)) OF
+                                        SL-DestinationIndex-r16 OPTIONAL,
+  sl-MeasConfigInfoToAddModList-r16  SEQUENCE (SIZE (1..maxNrofSL-Dest-r16)) OF
+                                        SL-MeasConfigInfo-r16 OPTIONAL,
+  t400-r16                           ENUMERATED {
+    ms100, ms200, ms300, ms400, ms600, ms1000, ms1500, ms2000
+  } OPTIONAL,
+  ...
+}
+
+SL-PHY-MAC-RLC-Config-r16 ::= SEQUENCE {
+  sl-ScheduledConfig-r16          SetupRelease-SL-ScheduledConfig-r16 OPTIONAL,
+  sl-UE-SelectedConfig-r16        SetupRelease-SL-UE-SelectedConfig-r16 OPTIONAL,
+  sl-FreqInfoToReleaseList-r16    SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF
+                                    SL-Freq-Id-r16 OPTIONAL,
+  sl-FreqInfoToAddModList-r16     SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF
+                                    SL-FreqConfig-r16 OPTIONAL,
+  sl-RLC-BearerToReleaseList-r16  SEQUENCE (SIZE (1..maxSL-LCID-r16)) OF
+                                    SL-RLC-BearerConfigIndex-r16 OPTIONAL,
+  sl-RLC-BearerToAddModList-r16   SEQUENCE (SIZE (1..maxSL-LCID-r16)) OF
+                                    SL-RLC-BearerConfig-r16 OPTIONAL,
+  sl-MaxNumConsecutiveDTX-r16     ENUMERATED {
+    n1, n2, n3, n4, n6, n8, n16, n32
+  } OPTIONAL,
+  sl-CSI-Acquisition-r16          ENUMERATED { enabled } OPTIONAL,
+  sl-CSI-SchedulingRequestId-r16  SetupRelease-SchedulingRequestId OPTIONAL,
+  sl-SSB-PriorityNR-r16           INTEGER (1..8) OPTIONAL,
+  networkControlledSyncTx-r16     ENUMERATED { on, off } OPTIONAL
+}
+
+-- ============================================================================
+-- 12. Sidelink pre-configured parameters
+-- ============================================================================
+
+SL-PreconfigurationNR-r16 ::= SEQUENCE {
+  sidelinkPreconfigNR-r16      SidelinkPreconfigNR-r16,
+  ...,
+  [[ sidelinkPreconfigNR-v16k0 SidelinkPreconfigNR-v16k0 ]]
+}
+
+SidelinkPreconfigNR-r16 ::= SEQUENCE {
+  sl-PreconfigFreqInfoList-r16
+    SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF SL-FreqConfigCommon-r16
+      OPTIONAL,
+  sl-PreconfigNR-AnchorCarrierFreqList-r16
+    SL-NR-AnchorCarrierFreqList-r16 OPTIONAL,
+  sl-PreconfigEUTRA-AnchorCarrierFreqList-r16
+    SL-EUTRA-AnchorCarrierFreqList-r16 OPTIONAL,
+  sl-RadioBearerPreConfigList-r16
+    SEQUENCE (SIZE (1..maxNrofSLRB-r16)) OF SL-RadioBearerConfig-r16
+      OPTIONAL,
+  sl-RLC-BearerPreConfigList-r16
+    SEQUENCE (SIZE (1..maxSL-LCID-r16)) OF SL-RLC-BearerConfig-r16
+      OPTIONAL,
+  sl-MeasPreConfig-r16
+    SL-MeasConfigCommon-r16 OPTIONAL,
+  sl-OffsetDFN-r16
+    INTEGER (1..1000) OPTIONAL,
+  t400-r16
+    ENUMERATED { ms100, ms200, ms300, ms400, ms600, ms1000, ms1500, ms2000 }
+      OPTIONAL,
+  sl-MaxNumConsecutiveDTX-r16
+    ENUMERATED { n1, n2, n3, n4, n6, n8, n16, n32 } OPTIONAL,
+  sl-SSB-PriorityNR-r16
+    INTEGER (1..8) OPTIONAL,
+  sl-PreconfigGeneral-r16
+    SL-PreconfigGeneral-r16 OPTIONAL,
+  sl-UE-SelectedPreConfig-r16
+    SL-UE-SelectedConfig-r16 OPTIONAL,
+  sl-CSI-Acquisition-r16
+    ENUMERATED { enabled } OPTIONAL,
+  sl-RoHC-Profiles-r16
+    SL-RoHC-Profiles-r16 OPTIONAL,
+  sl-MaxCID-r16
+    INTEGER (1..16383) DEFAULT 15,
+  ...
+}
+
+SidelinkPreconfigNR-v16k0 ::= SEQUENCE {
+  sl-PreconfigFreqInfoListExt-v16k0
+    SEQUENCE (SIZE (1..maxNrofFreqSL-r16)) OF SL-FreqConfigCommonExt-v16k0
+      OPTIONAL
+}
+
+SL-PreconfigGeneral-r16 ::= SEQUENCE {
+  sl-TDD-Configuration-r16  TDD-UL-DL-ConfigCommon OPTIONAL,
+  reservedBits-r16          BIT STRING (SIZE (2)) OPTIONAL,
+  ...
+}
+
+SL-RoHC-Profiles-r16 ::= SEQUENCE {
+  profile0x0001-r16  BOOLEAN,
+  profile0x0002-r16  BOOLEAN,
+  profile0x0003-r16  BOOLEAN,
+  profile0x0004-r16  BOOLEAN,
+  profile0x0006-r16  BOOLEAN,
+  profile0x0101-r16  BOOLEAN,
+  profile0x0102-r16  BOOLEAN,
+  profile0x0103-r16  BOOLEAN,
+  profile0x0104-r16  BOOLEAN
+}
+
+END

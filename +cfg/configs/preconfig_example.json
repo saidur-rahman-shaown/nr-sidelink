@@ -1,0 +1,113 @@
+{
+  "_comment": "Reference config 1/3 for the B0 gate. FR1, 20 MHz-class carrier, SCS 30 kHz (mu=1), single Mode-2 (UE-selected/sensing) resource pool used for both RX and TX. ARFCN/frequency values are illustrative round numbers, not calibrated to a real ITS band -- cfgValidate does not check RF calibration.",
+  "preconfig": {
+    "sl-PreconfigFreqInfoList-r16": [
+      {
+        "sl-SCS-SpecificCarrierList-r16": [
+          { "offsetToCarrier": 0, "subcarrierSpacing": "kHz30", "carrierBandwidth": 51 }
+        ],
+        "sl-AbsoluteFrequencyPointA-r16": 620000,
+        "valueN-r16": 0,
+        "sl-BWP-List-r16": [
+          {
+            "sl-BWP-Generic-r16": {
+              "sl-BWP-r16": { "locationAndBandwidth": 1099, "subcarrierSpacing": "kHz30" },
+              "sl-LengthSymbols-r16": "sym14",
+              "sl-StartSymbol-r16": "sym0"
+            },
+            "sl-BWP-PoolConfigCommon-r16": {
+              "sl-RxPool-r16": [
+                { "sl-SubchannelSize-r16": "n10", "sl-StartRB-Subchannel-r16": 0, "sl-NumSubchannel-r16": 5,
+                  "sl-RB-Number-r16": 50,
+                  "sl-TimeResource-r16": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                  "sl-PSCCH-Config-r16": { "case": "setup", "setup": {
+                    "sl-TimeResourcePSCCH-r16": "n2", "sl-FreqResourcePSCCH-r16": "n10",
+                    "sl-DMRS-ScrambleID-r16": 0, "sl-NumReservedBits-r16": 2 } },
+                  "sl-PSSCH-Config-r16": { "case": "setup", "setup": {
+                    "sl-PSSCH-DMRS-TimePatternList-r16": [2, 3], "sl-Scaling-r16": "f1" } },
+                  "sl-UE-SelectedConfigRP-r16": {
+                    "sl-RS-ForSensing-r16": "pssch",
+                    "sl-SensingWindow-r16": "ms100",
+                    "sl-SelectionWindowList-r16": [
+                      {"sl-Priority-r16":1,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":2,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":3,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":4,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":5,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":6,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":7,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":8,"sl-SelectionWindow-r16":"n20"}
+                    ],
+                    "sl-Thres-RSRP-List-r16": [20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20],
+                    "sl-ResourceReservePeriodList-r16": [
+                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms0"},
+                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms100"}
+                    ]
+                  },
+                  "sl-TxPercentageList-r16": [
+                    {"sl-Priority-r16":1,"sl-TxPercentage-r16":"p50"},
+                    {"sl-Priority-r16":2,"sl-TxPercentage-r16":"p50"},
+                    {"sl-Priority-r16":3,"sl-TxPercentage-r16":"p35"},
+                    {"sl-Priority-r16":4,"sl-TxPercentage-r16":"p35"},
+                    {"sl-Priority-r16":5,"sl-TxPercentage-r16":"p20"},
+                    {"sl-Priority-r16":6,"sl-TxPercentage-r16":"p20"},
+                    {"sl-Priority-r16":7,"sl-TxPercentage-r16":"p20"},
+                    {"sl-Priority-r16":8,"sl-TxPercentage-r16":"p20"}
+                  ],
+                  "sl-PreemptionEnable-r16": "enabled"
+                }
+              ],
+              "sl-TxPoolSelectedNormal-r16": [
+                { "sl-ResourcePoolID-r16": 1, "sl-ResourcePool-r16": {
+                  "sl-SubchannelSize-r16": "n10", "sl-StartRB-Subchannel-r16": 0, "sl-NumSubchannel-r16": 5,
+                  "sl-RB-Number-r16": 50,
+                  "sl-TimeResource-r16": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                  "sl-PSCCH-Config-r16": { "case": "setup", "setup": {
+                    "sl-TimeResourcePSCCH-r16": "n2", "sl-FreqResourcePSCCH-r16": "n10",
+                    "sl-DMRS-ScrambleID-r16": 0, "sl-NumReservedBits-r16": 2 } },
+                  "sl-PSSCH-Config-r16": { "case": "setup", "setup": {
+                    "sl-PSSCH-DMRS-TimePatternList-r16": [2, 3], "sl-Scaling-r16": "f1" } },
+                  "sl-UE-SelectedConfigRP-r16": {
+                    "sl-RS-ForSensing-r16": "pssch",
+                    "sl-SensingWindow-r16": "ms100",
+                    "sl-SelectionWindowList-r16": [
+                      {"sl-Priority-r16":1,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":2,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":3,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":4,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":5,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":6,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":7,"sl-SelectionWindow-r16":"n20"},
+                      {"sl-Priority-r16":8,"sl-SelectionWindow-r16":"n20"}
+                    ],
+                    "sl-Thres-RSRP-List-r16": [20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20],
+                    "sl-ResourceReservePeriodList-r16": [
+                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms0"},
+                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms100"}
+                    ]
+                  },
+                  "sl-TxPercentageList-r16": [
+                    {"sl-Priority-r16":1,"sl-TxPercentage-r16":"p50"},
+                    {"sl-Priority-r16":2,"sl-TxPercentage-r16":"p50"},
+                    {"sl-Priority-r16":3,"sl-TxPercentage-r16":"p35"},
+                    {"sl-Priority-r16":4,"sl-TxPercentage-r16":"p35"},
+                    {"sl-Priority-r16":5,"sl-TxPercentage-r16":"p20"},
+                    {"sl-Priority-r16":6,"sl-TxPercentage-r16":"p20"},
+                    {"sl-Priority-r16":7,"sl-TxPercentage-r16":"p20"},
+                    {"sl-Priority-r16":8,"sl-TxPercentage-r16":"p20"}
+                  ],
+                  "sl-PreemptionEnable-r16": "enabled"
+                } }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "sl-UE-SelectedPreConfig-r16": {
+      "sl-ReselectAfter-r16": "n5",
+      "sl-ProbResourceKeep-r16": "v0"
+    },
+    "sl-MaxCID-r16": 15
+  }
+}

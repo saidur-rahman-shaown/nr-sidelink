@@ -1,0 +1,36 @@
+function runAllTests()
+%runAllTests Run the full nrv2x test suite; error out if anything fails.
+
+here = fileparts(mfilename('fullpath'));
+addpath(fileparts(here));                  % package root
+setupPaths();
+
+tests = { ...
+    @test_SlotMap, ...
+    @test_CreselAndProc, ...
+    @test_Sensing814, ...
+    @test_MacTriggers, ...
+    @test_ReEvalPreemption, ...
+    @test_ChannelModel, ...
+    @test_LinkAdaptation, ...
+    @test_RFModule, ...
+    @test_TwoUEIntegration, ...
+    @test_SlotStructure, ...
+    @test_SensingSelectionWindows};
+
+nFail = 0;
+t0 = tic;
+for k = 1:numel(tests)
+    name = func2str(tests{k});
+    try
+        tests{k}();
+    catch e
+        nFail = nFail + 1;
+        fprintf(2, 'FAIL %s\n%s\n', name, getReport(e, 'extended', 'hyperlinks', 'off'));
+    end
+end
+fprintf('---\n%d/%d passed in %.1f s\n', numel(tests) - nFail, numel(tests), toc(t0));
+if nFail > 0
+    error('runAllTests:failures', '%d test file(s) failed.', nFail);
+end
+end
