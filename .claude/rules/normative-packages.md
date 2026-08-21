@@ -16,11 +16,18 @@ paths:
 These are the **normative packages**. Code here must be bit-exact against any other compliant
 implementation and must survive the C and HDL port unchanged in behaviour.
 
-- **No MATLAB toolbox call. None.** Not `nrPolarEncode`, not `lteZadoffChuSeq`, not `comm.*`.
-  If you need one, it belongs behind a wrapper in `+phy/+lib/` and this code calls the
-  wrapper. Flag any violation before writing anything else. `+phy/+lib/CLAUDE.md` governs how
-  each wrapper body is chosen — toolbox function first if one exists for the clause,
-  hand-written only if none does — this file only fixes that the call cannot happen here.
+- **MATLAB 5G Toolbox package functions (`nrXxx`) may be called directly.** Relaxed from a
+  strict toolbox-free rule by explicit user decision (2026-08-21), so each spec's
+  implementation stays physically inside its own `+tsXXXXX/` package folder — easy to
+  cross-check line-by-line against that spec's PDF — instead of being split across a package
+  folder and an indirection layer in `+phy/+lib/`. Non-5G-Toolbox MATLAB functionality
+  (`comm.*` System objects, `lteZadoffChuSeq`, etc.) is still out of bounds here; call `nrXxx`
+  5G Toolbox package functions only, and still cite the clause each call covers.
+  **Known tradeoff, accepted for now:** the C/HDL port will need to replace every direct
+  `nrXxx` call site individually rather than swapping out one `+phy/+lib/` layer. This does
+  not retroactively change code already routed through `+phy/+lib/` (e.g. `+phy/+ts38211/`'s
+  clause-5 primitives still call `phy.lib.goldSeq` etc.) — both patterns coexist; routing a
+  new wrapper through `+phy/+lib/` is no longer mandatory, not forbidden.
 - No cell arrays, containers.Map, tables, objects, dynamic field names, `varargin`, or `eval`
   on a function interface. Flat numeric arrays and plain scalar structs only.
 - No hidden state. No `persistent`, no `global`. State lives in explicit objects that

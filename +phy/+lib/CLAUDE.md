@@ -2,6 +2,16 @@
 
 Generic, mathematically unambiguous, not sidelink-specific. Wrapped in v1, replaced in v2.
 
+## Layout: flat here, subfoldered per spec once a second spec arrives
+
+The original four TS 38.211 wrappers stay flat, directly in `+phy/+lib/`. Starting with TS
+38.212, each additional spec's wrapper set gets its own `+phy/+lib/+tsXXXXX/` subfolder instead
+of adding to the flat list — keeps each spec's primitives easy to find and cross-check against
+that spec's PDF, and the toolbox-survey doc lives alongside its wrappers in the same subfolder
+rather than one shared file with rows from multiple specs. Call as `phy.lib.ts38212.crcEncode`,
+etc. `module-auditor`'s "zero toolbox calls outside `+lib/` and `+rx/`" gate still holds — every
+subfolder here is still inside `+lib/`.
+
 | Module | Replaces |
 |---|---|
 | `ofdmMod` / `ofdmDemod` | CP handling per numerology |
@@ -12,6 +22,28 @@ Generic, mathematically unambiguous, not sidelink-specific. Wrapped in v1, repla
 | `modMap` | modulation mapper, BPSK through 256-QAM, 38.211 cl. 5.1 |
 | `lowPaprSeq` | low-PAPR sequence generator, 38.211 cl. 5.2.2 -- PSFCH base sequences |
 | `scramble` | generic XOR-with-`goldSeq`; per-channel `cinit` derivation stays at the call site |
+
+### `+ts38212/` subfolder
+
+| Module | Replaces |
+|---|---|
+| `crcEncode` / `crcCheck` | CRC calculation/verification, 38.212 cl. 5.1 |
+| `cbSegment` | LDPC code block segmentation and per-block CRC, 38.212 cl. 5.2.2 |
+| `polarEncode` | polar encoding, 38.212 cl. 5.3.1 |
+| `polarRateMatch` / `polarDeRateMatch` | polar rate matching, 38.212 cl. 5.4.1 |
+| `ldpcEncode` | LDPC encoding, 38.212 cl. 5.3.2 |
+| `ldpcRateMatch` / `ldpcDeRateMatch` | LDPC rate matching **and code block concatenation**, 38.212 cl. 5.4.2 + 5.5 -- one call does both, no separate `cbConcat`, see `+ts38212/ch5-toolbox-survey.md` |
+
+Wave B (SCI-1A/2A/2B, MIB-SL, and the TRIV/FRIV resource-indicator formulas) does **not** move
+here — it's genuinely sidelink-specific with no toolbox equivalent, and stays hand-written in
+`+phy/+ts38212/` directly. See `+phy/+ts38212/CLAUDE.md`.
+
+Note: `.claude/rules/normative-packages.md` was, for a time, relaxed to permit calling 5G
+Toolbox `nrXxx` functions directly from normative packages, and this Wave A subfolder briefly
+lived in `+phy/+ts38212/` under that relaxation before moving back here. The rule relaxation
+itself was left in place (a deliberate, separate decision, not tied to this file move) even
+though nothing currently in the tree exercises it — Wave B never needed a toolbox call, and
+Wave A is back to routing through `+lib/`.
 
 ## The wrapper contract
 Each function has a signature **we** define and a toolbox body. When the C port happens, the
@@ -45,5 +77,7 @@ Split by which direction of the pair sits here.
 
 ## Gate
 Every decode-side wrapper round-trips against its normative counterpart across the parameter
-range; every generation-side wrapper matches its worked example. `module-auditor` reports
-zero toolbox calls outside `+lib/` and `+rx/`.
+range; every generation-side wrapper matches its worked example. `module-auditor`'s "zero
+toolbox calls outside `+lib/` and `+rx/`" gate no longer applies repo-wide since
+`.claude/rules/normative-packages.md` now permits direct `nrXxx` calls in normative packages
+too — it still holds for whichever code chooses to route through here instead.
