@@ -33,10 +33,20 @@ subfolder here is still inside `+lib/`.
 | `polarRateMatch` / `polarDeRateMatch` | polar rate matching, 38.212 cl. 5.4.1 |
 | `ldpcEncode` | LDPC encoding, 38.212 cl. 5.3.2 |
 | `ldpcRateMatch` / `ldpcDeRateMatch` | LDPC rate matching **and code block concatenation**, 38.212 cl. 5.4.2 + 5.5 -- one call does both, no separate `cbConcat`, see `+ts38212/ch5-toolbox-survey.md` |
+| `dciCrcEncode` / `dciCrcCheck` | CRC attachment for DCI/SCI-style payloads (24-ones prepend + CRC24C + optional RNTI mask), 38.212 cl. 7.3.2 -- built on top of `crcEncode`/`crcCheck`, not a reimplementation of clause 5.1 |
 
-Wave B (SCI-1A/2A/2B, MIB-SL, and the TRIV/FRIV resource-indicator formulas) does **not** move
-here — it's genuinely sidelink-specific with no toolbox equivalent, and stays hand-written in
-`+phy/+ts38212/` directly. See `+phy/+ts38212/CLAUDE.md`.
+`tbCrcSelect` (clause 6.2.1 CRC-polynomial-by-payload-size) and `ldpcBaseGraphSelect` (clause
+6.2.2 base-graph threshold formula) were built here, then removed: `+phy/+ts38212/slSchEncode`
+switched to calling `nrULSCH` directly (its own documentation states it implements exactly
+clause 6.2.1-6.2.6), which handles both selections internally, and nothing else in the tree
+called either function. See `+phy/+ts38212/CLAUDE.md`'s Wave C section for the bit-exact
+cross-check done before making that switch, and its Known traps for the clause 6.2.2 operator
+lesson (`pdftotext` drops the comparison operators in that clause entirely).
+
+Wave B (SCI-1A/2A/2B, MIB-SL, and the TRIV/FRIV resource-indicator formulas) and Wave C (the
+SL-BCH/SL-SCH/SCI transport-channel chains and the clause 8.2.1 multiplexing algorithm) do
+**not** move here — they're genuinely sidelink-specific with no toolbox equivalent, and stay
+hand-written in `+phy/+ts38212/` directly. See `+phy/+ts38212/CLAUDE.md`.
 
 Note: `.claude/rules/normative-packages.md` was, for a time, relaxed to permit calling 5G
 Toolbox `nrXxx` functions directly from normative packages, and this Wave A subfolder briefly

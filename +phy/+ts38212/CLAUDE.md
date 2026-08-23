@@ -80,6 +80,63 @@ resource offsets into the packed value, mirroring `slPSFCH.m` generating a seque
 cyclic shift rather than choosing the shift. Resource *selection* is TS 38.214 Mode-2 sensing,
 a `+phy/+ts38214/` concern, not built yet.
 
+## Wave C — transport-channel processing chains — done
+
+Wave B built the SCI-1A/2A/2B/MIB-SL bit *layouts* only — which bits mean what. It never
+composed those bits through CRC → coding → rate-matching → multiplexing into the actual coded
+bit sequence a transmitter sends. Wave C closes that gap: clause 8.1 (SL-BCH), 8.2+8.2.1
+(SL-SCH + multiplexing), 8.3.2–8.3.4 (SCI-1A chain), 8.4.2–8.4.4 (SCI-2 chain + sizing). Every
+chain stops at coded/multiplexed bits — scrambling, modulation, and RE mapping are TS 38.211's
+job (`+chan/`'s, not built yet), never this package's.
+
+Two of clause 8's cross-references turned out to hide real content, not just "call this generic
+procedure":
+
+- **Clause 7.3.2's CRC (used by SCI-1A via 8.3.2, SCI-2 via 8.4.2) is not clause 5.1's CRC.** It
+  prepends 24 ones to the payload before computing CRC24C, then discards the ones from the
+  output (keeping only payload + new parity). `dciCrcEncode`/`dciCrcCheck` implement this;
+  `crcEncode` alone would silently produce a wrong-but-plausible answer. Independent-verifier
+  confirmed the prepend-and-discard behaviour and the exact parity value for a worked example,
+  plus the RNTI-masking split (top 8 parity bits never masked, low 16 masked MSB-first) — not
+  that sidelink ever uses non-empty `rnti`; SCI explicitly skips this step per clause 8.3.2/
+  8.4.2's "except that scrambling is not performed."
+- **SCI-2's rate matching uses `iBIL=1`** (clause 8.4.4), unlike SCI-1A (`iBIL=0`, via 8.3.4→
+  7.3.4) and SL-BCH (`iBIL=0`, via 8.1→7.1.5). Easy to get backwards without re-reading each
+  clause's own statement.
+- **`slSchEncode`'s legal modulation set is `{QPSK,16QAM,64QAM,256QAM}` only — no BPSK of
+  either form.** Confirmed against a rendered TS 38.211 Table 8.3.1.2-1 (Supported modulation
+  schemes for PSSCH data), not recalled. This matters because it disagrees with *two* other
+  things in this codebase that look like they should govern it: `ldpcRateMatch` (clause 5.4.2,
+  generic — correctly allows all six Rel-16 schemes, since it's reused across channels, same
+  pattern as `modMap`) and `nrULSCH` itself (permits `'pi/2-BPSK'`, legal for Uu PUSCH but not
+  sidelink PSSCH data). Neither generic layer enforces the sidelink-specific restriction —
+  `slSchEncode` has to, matching the restriction already independently present in
+  `+phy/+ts38211/slPSSCHConfig.m`. This was a real gap in the first version of this file, caught
+  when the user asked to verify the swap to `nrULSCH` empirically rather than trust the
+  docstring match.
+
+| Module | Clause | Notes |
+|---|---|---|
+| `slBchEncode` | 8.1 (→ 7.1.3-7.1.5) | mibSlPack's output → CRC24C → polar(nMax=9,iIL=true) → rate match(iBIL=false, E=1386 normal CP / 1782 extended CP) |
+| `slSchEncode` | 8.2 (→ 6.2.1-6.2.6) | stops before 8.2.1 multiplexing, produces g^SL-SCH; `I_LBRM=0` always (sidelink fixes this, unlike Uu's UL-SCH). **Toolbox body: `nrULSCH`** — the one Wave C function that calls a toolbox object directly rather than composing Wave A primitives, since `nrULSCH`'s own documentation states it implements exactly "Section 6.2.1 to 6.2.6, without 6.2.7." Verified bit-identical against the original hand-composed chain (`crcEncode`→`cbSegment`→`ldpcEncode`→`ldpcRateMatch`) across both base graphs, the A=3824/3825 CRC-polynomial boundary, and 1-/2-layer transmission before switching — see the file's own header for the comparison. |
+| `sci1aChainEncode` | 8.3.2-8.3.4 (→ 7.3.2-7.3.4) | `dciCrcEncode(rnti=[])` → polar(nMax=9,iIL=true) → rate match(iBIL=false) |
+| `sci2OutputLength` | 8.4.4 | Q'_SCI2/G^SCI2 sizing formula; γ added *outside* the min{}, no clamp at the "not expected to exceed 4096" figure (a UE-capability statement, not a formula bound) — both independent-verifier-confirmed |
+| `sci2ChainEncode` | 8.4.2-8.4.3 + rate match | `dciCrcEncode(rnti=[])` → polar(nMax=9,iIL=true) → rate match(**iBIL=true**) |
+| `sci12Multiplex` | 8.2.1 (also serves 8.4.5) | NL=1 fully implemented (independent-verifier-confirmed: plain concatenation, gSci2 then gSlSch, no interleaving); NL=2 raises `nl2NotSupported` — see Known traps |
+
+`slBchEncode`/`sci1aChainEncode`/`sci2ChainEncode`/`sci12Multiplex` compose Wave A primitives by
+hand and touch no toolbox function directly. `slSchEncode` is the one exception (see table row
+above) — `+phy/+lib/+ts38212/tbCrcSelect`/`ldpcBaseGraphSelect` were built first, then removed
+once `nrULSCH` was confirmed to subsume both (clause 6.2.1 CRC-polynomial selection and clause
+6.2.2 base-graph selection happen inside `nrULSCH` automatically); nothing else in the tree
+called them, so they were dead code once `slSchEncode` stopped needing them.
+
+`dciCrcEncode`/`dciCrcCheck` (clause 7.3.2, generic, reused by both SCI chains) remain in
+`+phy/+lib/+ts38212/` alongside Wave A.
+
+`+test/+unit/+phy/+ts38212/test_chains.m` covers structural shape checks and the
+independent-verifier worked examples as regression assertions.
+
 ## The interface point that gets missed
 SCI-1A is not a fixed-width format. FRIV width depends on `sl-NumSubchannel`, TRIV width on
 the maximum number of reserved resources, and the reserved-bit count is pool-configured.
@@ -118,12 +175,26 @@ enumerate completely, done in `test_waveB.m`:
   reasoning — Wave A's toolbox round-trip is weaker evidence than it looks, per Wave B's own
   experience here.
 
+Wave C: `independent-verifier` worked examples for all four genuinely new hand-derived
+procedures (clause 7.3.2's CRC prepend, clause 6.2.2's base graph formula, clause 8.2.1's NL=1
+multiplexing, clause 8.4.4's sizing formula) — **done**, locked in as regression assertions in
+`test_chains.m`. One of the four checks (dciCrcEncode's A=34 worked example) turned out to be
+the verifier's own arithmetic slip, not an implementation bug — confirmed by independently
+re-deriving the masked parity via a plain `bitxor` and matching the implementation's output
+exactly; the other four cases (including the same masking step at two other RNTI values)
+already matched, which is why this was treated as the verifier's error rather than reason to
+distrust the earlier matches. Structural/round-trip tests alone (`test_chains.m`'s own
+assertions) are the same weak evidence Wave B's FRIV bug already showed they are.
+
 ## Gate
 Wave A: every primitive round-trips; polar and LDPC encode/decode recover over AWGN at
 plausible SNR; a BLER-vs-SNR curve for the LDPC chain from our own encoder. **Worked examples
 not yet run** — see Tests above.
 Wave B: round trip is the identity over the enumerated space (done), illegal inputs rejected
 (done), worked examples agree (**done** — see Tests above).
+Wave C: every chain's output length matches its formula (done); `independent-verifier` worked
+examples agree (**done** — see Tests above). NL=2 sidelink multiplexing is not implemented —
+see Known traps.
 
 ## Known traps
 - Bit ordering in CRC attachment and in rate matching. Fix one convention, document it in the
@@ -143,3 +214,19 @@ Wave B: round trip is the identity over the enumerated space (done), illegal inp
   itself perfectly and silently disagrees with every other implementation. Caught only by
   `independent-verifier`, not by this package's own round-trip tests. If this formula is ever
   re-transcribed from the PDF, re-derive it, don't trust a fresh read to catch it either.
+- **`sci12Multiplex` does not support `NL=2`** (SL-SCH mapped to 2 layers). Clause 8.2.1's NL=2
+  branch writes an explicit placeholder bit into the second layer's SCI-2 positions and never
+  assigns it a value in this clause — independent-verifier traced the placeholder's actual
+  resolution to TS 38.211 clause 8.3.1.1 (PSSCH scrambling: `if b(i)=x, b̃(i)=b̃(i-2)`, i.e. it
+  copies the already-scrambled bit two positions earlier). That is not computable from this
+  function's pre-scrambling output — implementing NL=2 here would mean either inventing a
+  sentinel value or pulling scrambling forward across a stage boundary. Revisit once 38.211
+  scrambling exists and the two stages can be composed properly.
+- **Clause 6.2.2's base graph formula uses non-strict `≤` throughout** — worth remembering even
+  though it now lives inside `nrULSCH` rather than a standalone function in this package.
+  Confirmed by rendering the PDF page, not by `pdftotext`, which drops the comparison operators
+  in this clause entirely (a different failure mode than the FRIV exponent, same root cause:
+  don't trust a text-only PDF extraction for anything with special glyphs). `R ≤ 0.25` selects
+  base graph 2 regardless of `A`, even far above the 3824 threshold — the third condition is
+  not gated by the first two. If this formula is ever needed standalone again (independent of
+  `nrULSCH`), re-derive the operators from a rendered page, don't trust a fresh `pdftotext` read.
