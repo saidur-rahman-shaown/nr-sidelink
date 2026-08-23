@@ -4,10 +4,12 @@ function alpha = slPSFCHAlpha(m0, mcs, hopId, lp, nsf, NsymbSlot)
 %Inputs: m0         integer, 0..11 -- TS 38.213 Table 16.3-1 cyclic shift pair
 %                   value (not computed here: which pair/value applies is a
 %                   38.213 resource-determination procedure, not a 38.211
-%                   modulation formula -- caller supplies it)
+%                   modulation formula -- caller supplies it, computed via
+%                   phy.ts38213.psfchCyclicShiftM0)
 %        mcs        integer, 0..11 -- TS 38.213 Table 16.3-2/16.3-3 HARQ-ACK
 %                   cyclic shift (0 for NACK, 6 for ACK; caller-supplied for
-%                   the same reason as m0)
+%                   the same reason as m0, computed via
+%                   phy.ts38213.psfchCyclicShiftMcs)
 %        hopId      integer, 0..1023 -- higher-layer parameter sl-PSFCH-HopID
 %                   if configured, else 0 (this is the PSFCH sequence cinit,
 %                   same value slPSFCH's u/v derivation already uses)

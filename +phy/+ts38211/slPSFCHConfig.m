@@ -8,20 +8,21 @@ function cfg = slPSFCHConfig(pool, dynamicParams)
 %          .m0         integer, 0..11 -- TS 38.213 Table 16.3-1 cyclic shift
 %                      pair value. WHICH pair applies is a 38.213
 %                      resource-determination procedure (not a 38.211
-%                      modulation formula) -- caller supplies it; this
-%                      project does not implement Table 16.3-1 selection.
+%                      modulation formula) -- caller supplies it, computed
+%                      via phy.ts38213.psfchCyclicShiftM0(csPairIndex, NCS),
+%                      where csPairIndex comes from phy.ts38213.psfchResource.
 %          .mcs        integer, 0..11 -- TS 38.213 Table 16.3-2/16.3-3
 %                      HARQ-ACK cyclic shift (0 NACK, 6 ACK); same
-%                      caller-supplied reasoning as m0. Both tables are
-%                      reconstructed at Documentations/Notes/07-....md if a
-%                      caller wants to implement the lookup.
+%                      caller-supplied reasoning as m0, computed via
+%                      phy.ts38213.psfchCyclicShiftMcs(harqAckBit, ackNackOnly).
 %          .lp         integer, >=0 -- l', the slot-relative index of the
 %                      SECOND (content) PSFCH OFDM symbol
 %          .nsf        integer, >=0 -- slot number within a radio frame
 %          .NsymbSlot  integer, >0 -- OFDM symbols per slot (14 or 12)
 %          .startPRB   integer, >=0 -- the PRB carrying this PSFCH
-%                      transmission, per TS 38.213 clause 16.3 (also not
-%                      extracted; supplied by the caller)
+%                      transmission, per TS 38.213 clause 16.3, computed via
+%                      phy.ts38213.psfchPrbRange + phy.ts38213.psfchResource
+%                      (also not extracted here; supplied by the caller)
 %          .symbol     integer, >=0 -- same OFDM symbol index as .lp within
 %                      the slot (kept as a separate field since
 %                      slPSFCHIndices() wants the absolute slot symbol index
