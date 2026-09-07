@@ -20,6 +20,21 @@ per-transmission SCI-selected entry, since Table 8.1.3.2-1's multi-entry rows ar
 their singleton members — was a documentation/interface-contract fix, not a code fix (the
 lookup table itself was already keyed correctly for whatever array it's given).
 
+Clause 8.1.6 (congestion control) was added later, in its own pass, and also got an
+independent-verifier worked example before being trusted. This time the verifier **matched the
+implementation on every computed value** — all 8 `procTimeCongestion` (µ, capability) pairs, all
+9 `cbrRangeIndex` levels, and all three `congestionControlCheck` cases including the summation
+direction. No code changed as a result. What the pass did produce was four things the tests and
+headers did not yet say, all now folded in: (1) Table 8.1.6-2 is both `2 ×` Table 8.1.6-1 for
+µ≥1 *and* equal to Table 8.1.6-1 shifted one row, so a row-offset bug impersonates a
+table-selection bug — the test now asserts both full vectors rather than sampling; (2) the CBR
+range inclusivity is inferred, not quoted (see below); (3) `congestionControlCheck`'s case A
+does *not* discriminate the summation direction on `withinLimit` alone, so the verifier's
+own equality-boundary case was added, which does; (4) the SCI-codepoint-0..7 to
+priority-value-1..8 offset lives entirely outside these functions and is invisible to every test
+here — a caller applying it twice, or not at all, shifts every limit by one priority level
+silently. Recorded in `congestionControlCheck.m`'s header as a caller obligation.
+
 | Module | Clause | Notes |
 |---|---|---|
 | `subchannelMap` | 8 (preamble) | `sl-StartRB-Subchannel`/`sl-SubchannelSize`/`sl-NumSubchannel` → PRB ranges |
@@ -29,9 +44,13 @@ lookup table itself was already keyed correctly for whatever array it's given).
 | `reservationPeriodToSlots` | 8.1.7 | P_rsvp (ms) → P'_rsvp (logical slots) |
 | `sensingDbInit` / `sensingDbRecord` / `sensingDbMarkUnmonitored` | 8.1.4 step 2 | struct-of-parallel-arrays sensing history: decoded SCI-1A (incl. clause 8.1.5 TRIV/FRIV chaining, fixed-width up to 3 resources) + RSRP + the unmonitored-slot set |
 | `candidateSet` | 8.1.4 steps 1-7 | the core algorithm; re-evaluation/pre-emption deliberately excluded, see below |
+| `procTimeCongestion` | 8.1.6, Tables 8.1.6-1/-2 | congestion control processing time N, per UE processing timing capability |
+| `cbrRangeIndex` | 8.1.6 (+ TS 38.331 `sl-CBR-RangeConfigList`) | measured CBR → CBR range/level index |
+| `congestionControlCheck` | 8.1.6 | `Σ_{i≥k} CR(i) ≤ CR_limit(k)`; reports, never drops |
 
 Build order followed: `subchannelMap` → `mcsTableSelect`/`tbsDetermine` → `procTimeSensing`/
-`procTimeSelection`/`reservationPeriodToSlots` → `sensingDb*` → `candidateSet`.
+`procTimeSelection`/`reservationPeriodToSlots` → `sensingDb*` → `candidateSet` →
+`procTimeCongestion`/`cbrRangeIndex`/`congestionControlCheck`.
 
 ## Design decisions made while building (read before extending this package)
 - **Logical slots only.** Every slot quantity `candidateSet`/`sensingDb*` touch (trigger slot
@@ -64,11 +83,23 @@ Build order followed: `subchannelMap` → `mcsTableSelect`/`tbsDetermine` → `p
   paragraphs, and TS 38.321 §5.22.1.2a). `candidateSet` still returns the final escalated
   threshold offset, since `+mac/`'s pre-emption check needs "the final threshold after
   executing steps 1)-7)" verbatim.
-- **Congestion control (clause 8.1.6, CR/CR_Limit) is out of scope** — it isn't in this
-  package's original module list and needs CBR (TS 38.215, not built; see
-  `Documentations/Notes/00-INDEX.md` gap list). Same for clause 8.2-8.6 (CSI-RS/DM-RS/PT-RS
-  transmission and reception procedures, congestion control, CSI reporting) — not requested,
-  not built.
+- **Congestion control (clause 8.1.6) is built, but measures nothing itself.** Added after the
+  original module list, so the three modules follow this package's established
+  "pre-resolved units taken as an input" pattern rather than reaching for machinery that
+  doesn't exist: CR(i) and CBR are both TS 38.215 measurements (`+phy/+ts38215/` is still not
+  built — see `Documentations/Notes/00-INDEX.md`), and `CR_limit(k)` requires the
+  `sl-CBR-PriorityTxConfigList` → `sl-CBR-ConfigIndex` → `sl-Tx-ConfigIndexList` →
+  `sl-CBR-PSSCH-TxConfigList` → `sl-CR-Limit` chain, which `+cfg/` does not resolve either
+  (`+cfg/preconfig.m` parses `sl-CBR-CommonTxConfigList-r16` only as priority/CBR pairs).
+  `cbrRangeIndex` implements the one genuinely normative piece of that chain — clause 8.1.6's
+  "the CBR range which includes the CBR measured in slot n-N" — and the rest is taken
+  pre-resolved, exactly as `candidateSet` takes `sl-Thres-RSRP-List` and `sl-TxPercentageList`.
+  **`congestionControlCheck` reports, it does not drop.** Clause 8.1.6's closing sentence ("It
+  is up to UE implementation how to meet the above limits, including dropping the transmissions
+  in slot n") is a policy decision and belongs in `+phy/+rx/+policy/`, the same split this
+  package already applies to the T1/T2 choice.
+- **Clause 8.2-8.6 remain out of scope** (CSI-RS/DM-RS/PT-RS transmission and reception
+  procedures, CSI reporting) — not requested, not built.
 - **Cross-checked against prior art, not copied from it.** `nrv2x-matlab/phy/sensing/` (a
   separate, non-normative legacy codebase in this same repo) has a spec-faithful sensing/
   selection implementation, and `Documentations/Notes/08-Mode2-Conformance-Audit.md` audits a
@@ -147,15 +178,41 @@ DM-RS pattern, which drives `N_RE'` negative) is currently rejected by `tbsDeter
 precondition check rather than caught earlier at `+cfg/cfgValidate.m` — a reasonable place to
 add that check later, not built now.
 
+Two more `pending-human` items from the clause-8.1.6 pass, both on `cbrRangeIndex` and both
+about the same sentence in TS 38.331 that does not say enough:
+- **Are the CBR range bounds upper-inclusive?** The `sl-CBR-RangeConfigList` field description
+  never uses the words "inclusive" or "exclusive" and never states the lower bound of ranges
+  2..N at all. `cbrRangeIndex` implements `[0, b₁]` then `(b_{j-1}, b_j]`, which the verifier
+  derived independently and by the same consistency argument (nothing else classifies both
+  cbr=0 and cbr=1.0 while keeping the ranges disjoint) — but *derived* is the operative word,
+  and this is not a corner case: `SL-CBR-r16` is `INTEGER(0..100)`, so both the measurement and
+  the bounds are natively multiples of 0.01 and the exact-bound cases are the **only** boundary
+  behaviour a real configuration can produce.
+- **What if the measured CBR exceeds every configured range?** No spec text covers it. This
+  package errors (`ts38214:cbrRangeIndex:noRange`) rather than clamping to the top level, on the
+  grounds that clause 8.1.6 assumes a range always exists, so a top bound below 1 is an
+  incomplete config — properly a `+cfg/cfgValidate.m` check, which is not written. A human
+  should confirm erroring is the behaviour wanted before a harness depends on it.
+
 ## Gate
 `candidateSet` returns exactly the hand-computed `S_A`, escalation rounds included — met, and
 cross-checked independently. `tbsDetermine`'s N_RE formula matches an independent worked
 example across five cases (nominal plus four branch/boundary variants) after the `N_symb^sh`
-fix above. The selection-window visualisation (excluded resources coloured by exclusion
+fix above. Clause 8.1.6's three modules match an independent worked example on every case
+computed (8 processing-time pairs, 9 CBR levels, 3 CR-limit scenarios) with no code change
+needed, subject to the two `pending-human` inclusivity/out-of-range decisions above. The
+selection-window visualisation (excluded resources coloured by exclusion
 reason, `S_A` highlighted, chosen resource marked) is **not built** — deferred, not requested
 for this pass.
 
 ## Known traps
+- **Clause 8.1.6's `Σ_{i≥k}` accumulates DOWNWARD in priority.** Priority value 1 is the
+  highest and 8 the lowest, so `CR_limit(1)` constrains the occupancy of *all eight*
+  priorities and `CR_limit(8)` constrains only priority 8's own. Written as a forward
+  cumulative sum (`i ≤ k`) it still produces plausible ratios in [0,1] and still passes any
+  test whose CR vector is flat — it fails silently. `congestionControlCheck` writes the
+  literal `for i = k:8` loop rather than a `cumsum` for this reason, and its test uses a
+  front-loaded CR vector so the two directions give visibly different answers.
 - **`N_symb^sh = sl-LengthSymbols - 2`, not `sl-LengthSymbols`.** `tbsDetermine.m` dropped this
   term entirely in its first version — the "-2" is easy to miss reading clause 8.1.3.2's dense
   formula, and this project's own nrTBS cross-check test didn't catch it because the test's
