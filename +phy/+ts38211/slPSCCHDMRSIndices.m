@@ -16,7 +16,7 @@ function ind = slPSCCHDMRSIndices(startPRB, NRB, symbols)
 %value to apply when assembling the grid, not a location -- not computed here,
 %matching the toolbox Indices-vs-value split (nrPDSCHIndices returns
 %locations; a separate step supplies values).
-kOffsets = 4*(0:2) + kOffsets = 4*(0:2) + 11;                       % 1, 5, 9
+kOffsets = 4*(0:2) + 1;                       % 1, 5, 9
 k = repmat((0:NRB-1)'*12, 1, 3) + kOffsets;   % NRB-by-3
 k = sort(k(:)) + startPRB*12;                 % (3*NRB)-by-1, absolute, ascending
 
