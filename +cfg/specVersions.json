@@ -1,11 +1,11 @@
 {
-  "_comment": "Frozen per +cfg/CLAUDE.md: 'written once, changed only by explicit decision'. TS38211/212/213/214/321/323/331 are read verbatim from the title page of the matching PDF in Documentations/ (see Documentations/Notes/00-INDEX.md). TS38215/38322/37324/24587/23287/37885 have no local PDF and stay as unverified placeholders -- do not treat those six as authoritative (this is exactly why +cfg/pqiTable.m's TS23287 rows are recalled, not extracted).",
+  "_comment": "Frozen per +cfg/CLAUDE.md: 'written once, changed only by explicit decision'. TS38211/212/213/214/215/321/323/331 are read verbatim from the title page of the matching PDF in Documentations/ (see Documentations/Notes/00-INDEX.md). TS38322/37324/24587/23287/37885 have no local PDF and stay as unverified placeholders -- do not treat those five as authoritative (this is exactly why +cfg/pqiTable.m's TS23287 rows are recalled, not extracted). TS38215 moved off that placeholder list when +phy/+ts38215/ was built: a local PDF ('Documentations/38215-g70 2.pdf') now exists and its title page reads V16.7.0 (2023-12), so the recalled placeholder V16.6.0 was corrected to V16.7.0. Not cosmetic -- V16.7.0's change history carries two Rel-16 CRs against the sidelink measurement clauses that package implements ('Corrections to Applicable RRC States for Sidelink Measurements' and 'CR on applicability of sidelink measurements'). This is the explicit decision +cfg/CLAUDE.md requires for changing this file.",
   "TS38331": "V16.22.0",
   "TS38211": "V16.10.0",
   "TS38212": "V16.15.0",
   "TS38213": "V16.17.0",
   "TS38214": "V16.17.0",
-  "TS38215": "V16.6.0",
+  "TS38215": "V16.7.0",
   "TS38321": "V16.22.0",
   "TS38322": "V16.6.0",
   "TS38323": "V16.8.0",
