@@ -56,3 +56,30 @@ animated scenario view shows per-UE resource occupancy and live PRR.
 - Reaching into module internals for convenience. Every KPI comes from the logging interface,
   never from a peek at private state, or the harness will not survive the port.
 - Channel model wrapped means wrapped. No toolbox call escapes `+chanmodel/`.
+
+## Built so far
+`poolAllSlots` only — the baseline Mode-2 resource pool, in which **every slot of the DFN
+period is a sidelink slot**. In Mode 2 there is no serving cell handing out a
+tdd-UL-DL-ConfigurationCommon, and `BUILD.md` defers S-SSB end-to-end sync explicitly, so
+nothing takes slots away and the pool is the whole period. Different pool configurations come
+later; this is the one the first end-to-end runs use.
+
+It wraps `phy.ts38214.poolSlotMap` rather than reimplementing it, and asserts that the result
+is literally every slot.
+
+### The bitmap length is load-bearing, and an all-ones bitmap is not enough
+Clause 8's reserved-slot rule removes `(L mod L_bitmap)` slots **before** the bitmap is applied.
+So "every slot" holds only when `L_bitmap` divides `10240*2^mu = 2^(11+mu) * 5`. Among the
+lengths a configuration is likely to carry, **10, 16, 20, 40 and 160 divide it; 11, 12, 30, 50,
+60 and 100 do not** — at `L_bitmap = 100` and mu = 1 an all-ones bitmap over a fully-sidelink
+period still loses **80** slots, evenly spread, silently. `poolAllSlots` pins length 10, the
+shortest legal value (SIZE(10..160)) that divides the period at every numerology, and asserts
+the outcome so a later edit cannot quietly reintroduce the loss.
+
+### The identity is a property of this configuration, not of the mapping
+In the baseline, logical slot i **is** physical slot i. That makes the first runs easy to read,
+and it is exactly the condition under which a caller that forgot to convert still produces
+correct-looking output — until a real TDD pattern or S-SSB arrives. Convert through the arrays
+anyway. `+test/+unit/+harness/test_poolAllSlots.m` carries a deliberately non-identity
+configuration alongside the baseline for this reason, and a case showing that excluding one
+slot removes ten (see `+phy/+ts38214/CLAUDE.md`).

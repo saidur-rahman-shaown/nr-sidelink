@@ -88,6 +88,14 @@ N_reserved, all twelve reserved indices, T'max, the first five pool slots and al
 - **`m` starts at 0, so `l_0` is always reserved whenever N_reserved > 0.** The N_reserved = 0
   case is therefore the *only* one in which physical slot 0 can be in the pool. Both cases are
   tested; the boundary is invisible otherwise.
+- **Excluding one slot can remove ten.** `N_reserved = L mod L_bitmap` is recomputed from
+  whatever survives the S-SSB and non-SL exclusions, so removing a single slot can push
+  N_reserved from 0 to `L_bitmap - 1`. At the baseline (`harness.poolAllSlots`, mu=1,
+  L_bitmap=10) one extra S-SSB slot takes the pool from 20480 to **20470**, not 20479, and
+  because `m` starts at 0 the newly-reserved set includes `l_0` — so physical slot 0 leaves the
+  pool and the map stops being the identity at its first entry. Nothing reports this; it is
+  arithmetic, not an error. Any scenario that changes the exclusion count changes T'max
+  non-linearly.
 - **The reserved index `r` indexes `(l_0, l_1, ...)`, not physical slots.** `l` is the sequence
   that already survived the S-SSB and non-SL exclusions. Applying `r` to physical slot numbers
   removes the wrong slots and still produces a plausible, correctly-sized pool.

@@ -139,6 +139,12 @@ implements. Built as `+phy/+ts38214/poolSlotMap`, which returns both directions 
 from one pass, so the conversion is applied **exactly once** and the two directions cannot
 disagree — `.claude/rules/portability.md`.
 
+**Baseline pool: every slot is a sidelink slot.** In Mode 2 there is no serving cell taking
+slots away, and S-SSB sync is deferred, so the first configuration is the whole DFN period —
+`+harness/poolAllSlots`. The logical↔physical map is then the identity, which makes early runs
+readable but also means a dropped conversion looks correct; convert through the arrays anyway.
+Other pool configurations come later.
+
 Also decided here, not later: the **BLER table key structure** (MCS, SINR, channel model,
 speed, retransmission index at minimum). `+harness/CLAUDE.md` is right that adding a dimension
 after the curves exist means regenerating all of them.
