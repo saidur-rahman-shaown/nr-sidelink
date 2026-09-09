@@ -10,11 +10,12 @@ into `phy.ts38214.candidateSet` and letting *it* re-derive the bounds.
 
 | Module | Decision | This cut |
 |---|---|---|
-| `defaults` | L_subCH, MCS, P_rsvp_TX, blind retx count, escalation guard | 2 sub-channels, MCS 7 (QPSK), 100 ms, 1 retx, 10 |
+| `defaults` | MCS, P_rsvp_TX, blind retx count, escalation guard | MCS 7 (QPSK), 100 ms, 1 retx, 10. **No L_subCH** |
+| `subchannelsForTbs` | L_subCH | smallest allocation whose TBS at that MCS holds the PDU |
 | `remainingPdbSlots` | how much budget is left, and when to discard | floor(PDB·2^µ) − elapsed, clamped at 0, in **physical** slots |
 | `pdbLogicalSlots` | that budget as pool opportunities | exact count, not a duty-cycle scaling |
 | `selectionWindow` | T1, T2 | **T1 = T_proc,1^SL, T2 = the remaining PDB** |
-| `selectionRequest` | assembles `candidateSet`'s `req` | glue; computes nothing normative |
+| `selectionRequest` | assembles `candidateSet`'s `req` | derives L_subCH; computes nothing normative |
 | `resourcePick` | which resource out of S_A | uniform |
 
 ## This package is the MAC scheduler
@@ -54,6 +55,31 @@ bind. `test_policy` sweeps budgets either side of T2min at all four numerologies
 An optimising policy shrinks T2 toward T2min while CBR (`+phy/+ts38215/`) is low and reopens it
 toward the PDB as contention rises. That policy replaces `selectionWindow` and nothing else —
 no caller, and no normative module, changes.
+
+## L_subCH is derived, never supplied
+There is **no `defaults.LsubCH`**, deliberately. L_subCH is not a policy constant — it is
+whatever the chosen MCS needs to carry the MAC PDU actually pending, so `selectionRequest`
+derives it per selection through `subchannelsForTbs` against a TBS table the caller supplies
+from `phy.ts38214.tbsDetermine` at `defaults.mcs`. There is no code path that selects a grant
+too small for its own data: `subchannelsForTbs` raises rather than returning a value that does
+not fit, and `selectionRequest` refuses a policy with no table rather than defaulting.
+
+An earlier version carried `LsubCH = 2` as a documented stand-in, and it was wrong twice over:
+- **It did not fit.** A 300-byte CAM at MCS 7 needs three sub-channels (TBS 372 B), not two
+  (TBS 233 B) — and nothing detected the shortfall. The payload was simply transmitted at the
+  wrong size.
+- **It decoupled the allocation from the MCS.** The same 308-byte PDU needs **5** sub-channels
+  at MCS 4, **3** at MCS 7 and **2** at MCS 11. A constant means changing `mcs` leaves the
+  allocation stale, in whichever direction happens to be wrong.
+
+Deriving it also makes the allocation follow the backlog: a UE with more queued data selects a
+wider grant, which is what clause 5.22.1.1's "an amount of frequency resources" actually means.
+
+**Smallest that fits is itself a policy.** Occupying the least spectrum leaves the most for
+everyone else and lowers collision probability pool-wide — the right default with no
+coordination. A larger allocation at the same MCS buys a lower effective code rate and better
+range for this UE at everyone else's expense. Which wins depends on load, so it is measurable
+rather than obvious, and it is a knob here rather than a constant elsewhere.
 
 ## Two units, and they are equal only in the baseline
 A delay budget is **wall clock**; clause 8.1.4's T1, T2 and n are **logical pool slot** offsets.
@@ -98,15 +124,20 @@ look like it had time it did not have.
 - **Randomness is an input here too.** `resourcePick` takes the draw, following `+mac/`'s rule,
   so a grant lifecycle replays exactly from its seed. No `rand()` in this package even though
   the non-normative rules would allow it.
-- **`defaults.LsubCH` is a stand-in for arithmetic that does not exist yet.** L_subCH should
-  come from the MAC PDU size, by inverting `phy.ts38214.tbsDetermine` against the pool's
-  sub-channel size. Until that module exists a constant sits there, and a payload that does not
-  fit will not be detected — it will just be transmitted at the wrong size.
+- **The TBS table must be built at the policy's own `mcs`.** `subchannelsForTbs` cannot check
+  this — it sees only a vector of sizes. A table computed at a different MCS than the one
+  actually signalled produces an allocation that is confidently wrong in either direction, and
+  nothing downstream contradicts it. Whoever fills `tbsBytesByLsubCH` owns that pairing.
+- **MAC PDU overhead is per-SDU, not a single constant.** Clause 6.2.4 gives every subPDU its
+  own subheader, so a PDU carrying two SDUs costs more than one carrying one. Sizing a grant
+  with a single measured overhead understates a multi-SDU PDU. `+harness/+sls/scenarioInit`
+  measures the fixed and per-SDU parts separately, by building probe PDUs with `muxSlSch`
+  rather than reading subheader widths out of the clause by hand.
 
 ## Not built
 - **MCS adaptation.** `defaults.mcs` is fixed. Broadcast has no CSI, so the interesting policy
-  is CBR- or geometry-driven, not feedback-driven.
-- **L_subCH from TBS**, per the trap above.
+  is CBR- or geometry-driven, not feedback-driven. Note that MCS and L_subCH are now coupled
+  through the TBS table, so an adaptive MCS moves the allocation with it automatically.
 - **Congestion-control action.** `phy.ts38214.congestionControlCheck` reports a CR limit breach
   and clause 8.1.6 leaves the response ("including dropping the transmissions in slot n") to
   implementation. That response belongs here and is absent.

@@ -7,6 +7,12 @@ function test_policy()
 %      correctness test for a policy; there is a legality test, which is this file.
 
 pol = phy.rx.policy.defaults();
+% defaults() carries no L_subCH -- it is derived per selection from the TBS table at the chosen
+% MCS. A test that wants a request must therefore supply the table, exactly as a caller does.
+% This one is synthetic (a linear 200 bytes per sub-channel) so the arithmetic is checkable by
+% hand; the scenario builds the real one from phy.ts38214.tbsDetermine.
+pol.tbsBytesByLsubCH = 200 * (1:10);
+probePdu = 350;                      % needs 2 sub-channels: 200 < 350 <= 400
 
 %% ---- remainingPdbSlots -------------------------------------------------
 % 100 ms PDB at mu=1 (0.5 ms slots) is 200 slots. Nothing elapsed yet.
@@ -60,7 +66,7 @@ for mu = 0:3
     % Budgets spanning well below T2min (forcing the "T2 = PDB outright" branch) to well above
     % it (the "[T2min, PDB]" range branch).
     for remPdb = [tProc1, tProc1 + 3, 20 * 2^mu, 20 * 2^mu + 25]
-        [req, feasible] = phy.rx.policy.selectionRequest(1000, mu, remPdb, 4, 5, pol);
+        [req, feasible] = phy.rx.policy.selectionRequest(1000, mu, remPdb, 4, 5, pol, probePdu);
         assert(feasible, 'selectionRequest: budget %d at mu=%d should be feasible', remPdb, mu);
         % Does not raise => T1 and T2 both passed candidateSet's clause 8.1.4 validation.
         [candY, candX, survivor, Mtotal] = phy.ts38214.candidateSet( ...
@@ -74,26 +80,26 @@ for mu = 0:3
 end
 
 % The infeasible case must be caught by the policy, not by candidateSet's emptyWindow error.
-[req, feasible] = phy.rx.policy.selectionRequest(1000, 1, 3, 4, 5, pol);
+[req, feasible] = phy.rx.policy.selectionRequest(1000, 1, 3, 4, 5, pol, probePdu);
 assert(~feasible, 'selectionRequest: a 3-slot budget at mu=1 is below T_proc,1 = 5 and must report infeasible');
 assert(req.T2 == 3, 'selectionRequest: req is still fully formed on the infeasible path, for the discard log');
 
 %% ---- selectionRequest field plumbing -----------------------------------
-[req, ~] = phy.rx.policy.selectionRequest(4242, 1, 200, 2, 30, pol);
+[req, ~] = phy.rx.policy.selectionRequest(4242, 1, 200, 2, 30, pol, probePdu);
 assert(req.n == 4242 && req.prioTx == 2 && req.Cresel == 30, 'selectionRequest: trigger values must pass through unchanged');
 assert(req.remainingPdbSlots == 200 && req.T2 == 200, 'selectionRequest: T2 and remainingPdbSlots must agree under this policy');
-assert(req.LsubCH == pol.LsubCH && req.prsvpTxMs == pol.prsvpTxMs, 'selectionRequest: policy defaults must reach req');
+assert(req.prsvpTxMs == pol.prsvpTxMs, 'selectionRequest: policy defaults must reach req');
 % Varying the policy per call is the whole point of passing it in.
-alt = pol; alt.LsubCH = 5; alt.prsvpTxMs = 50;
-[reqAlt, ~] = phy.rx.policy.selectionRequest(4242, 1, 200, 2, 30, alt);
-assert(reqAlt.LsubCH == 5 && reqAlt.prsvpTxMs == 50, 'selectionRequest: an alternative policy struct must be honoured');
+alt = pol; alt.prsvpTxMs = 50;
+[reqAlt, ~] = phy.rx.policy.selectionRequest(4242, 1, 200, 2, 30, alt, probePdu);
+assert(reqAlt.prsvpTxMs == 50, 'selectionRequest: an alternative policy struct must be honoured');
 % Clause 8.1.4's aperiodic constraint.
 aper = pol; aper.prsvpTxMs = 0;
-mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 4, 5, aper), 'policy:selectionRequest:aperiodicCresel', 'Cresel must be 1 when aperiodic');
-[reqAper, ~] = phy.rx.policy.selectionRequest(1000, 1, 200, 4, 1, aper);
+mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 4, 5, aper, probePdu), 'policy:selectionRequest:aperiodicCresel', 'Cresel must be 1 when aperiodic');
+[reqAper, ~] = phy.rx.policy.selectionRequest(1000, 1, 200, 4, 1, aper, probePdu);
 assert(reqAper.Cresel == 1, 'selectionRequest: aperiodic with Cresel = 1 must be accepted');
-mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 0, 5, pol), 'policy:selectionRequest:badPrio', 'prioTx 0 is out of 1..8');
-mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 9, 5, pol), 'policy:selectionRequest:badPrio', 'prioTx 9 is out of 1..8');
+mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 0, 5, pol, probePdu), 'policy:selectionRequest:badPrio', 'prioTx 0 is out of 1..8');
+mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 9, 5, pol, probePdu), 'policy:selectionRequest:badPrio', 'prioTx 9 is out of 1..8');
 
 %% ---- resourcePick ------------------------------------------------------
 candY    = [10 10 11 11 12 12];
@@ -129,7 +135,7 @@ mustError(@() phy.rx.policy.resourcePick(candY, candX(1:3), survivor, 0.5), 'pol
 %% ---- defaults ----------------------------------------------------------
 % Not correctness -- these assert the defaults stay inside the ranges their consumers document,
 % so a careless edit to defaults.m fails here rather than deep inside candidateSet.
-assert(pol.LsubCH >= 1 && mod(pol.LsubCH, 1) == 0, 'defaults: LsubCH must be a positive integer');
+assert(~isfield(phy.rx.policy.defaults(), 'LsubCH'), 'defaults: there must be NO LsubCH field -- it is derived per selection, never supplied');
 assert(pol.mcs >= 0 && pol.mcs <= 31 && mod(pol.mcs, 1) == 0, 'defaults: mcs must be in 0..31 (SCI-1A field range)');
 assert(pol.prsvpTxMs >= 0, 'defaults: prsvpTxMs must be nonnegative');
 assert(pol.numRetx >= 0 && mod(pol.numRetx, 1) == 0, 'defaults: numRetx must be a nonnegative integer');
@@ -137,6 +143,28 @@ assert(pol.maxEscalations >= 1 && mod(pol.maxEscalations, 1) == 0, 'defaults: ma
 % The default MCS must resolve in the default (no additional) MCS table.
 [modulation, Qm, ~] = phy.ts38214.mcsTableSelect(pol.mcs, '', 0);
 assert(Qm == 2 && strcmp(modulation, 'QPSK'), 'defaults: mcs %d must be QPSK for a no-CSI broadcast default, got %s', pol.mcs, modulation);
+
+%% ---- L_subCH is derived from the TBS at the chosen MCS ------------------
+% The gate: an allocation is whatever carries the PDU, and nothing can supply one blind.
+tbl = 200 * (1:10);
+assert(phy.rx.policy.subchannelsForTbs(1, tbl)   == 1, 'the smallest PDU needs one sub-channel');
+assert(phy.rx.policy.subchannelsForTbs(200, tbl) == 1, 'an exact fit must not round up');
+assert(phy.rx.policy.subchannelsForTbs(201, tbl) == 2, 'one byte over must take the next sub-channel');
+assert(phy.rx.policy.subchannelsForTbs(2000, tbl) == 10, 'the largest PDU must take the whole pool');
+mustError(@() phy.rx.policy.subchannelsForTbs(2001, tbl), 'policy:subchannelsForTbs:doesNotFit', 'a PDU larger than any allocation');
+mustError(@() phy.rx.policy.subchannelsForTbs(100, [300 200 100]), 'policy:subchannelsForTbs:notMonotone', 'a TBS table that shrinks with L_subCH');
+% It tracks the PDU, so a bigger backlog selects a wider allocation.
+[rSmall, ~] = phy.rx.policy.selectionRequest(1000, 1, 200, 4, 5, pol, 150);
+[rBig,   ~] = phy.rx.policy.selectionRequest(1000, 1, 200, 4, 5, pol, 1500);
+assert(rSmall.LsubCH == 1 && rBig.LsubCH == 8, 'selectionRequest: L_subCH must follow the PDU size, got %d and %d', rSmall.LsubCH, rBig.LsubCH);
+% It tracks the MCS too: a table for a lower MCS carries less per sub-channel, so the same PDU
+% needs more of them. A constant L_subCH would silently decouple from the MCS here.
+lowMcs = pol; lowMcs.tbsBytesByLsubCH = 100 * (1:10);
+[rLow, ~] = phy.rx.policy.selectionRequest(1000, 1, 200, 4, 5, lowMcs, 350);
+assert(rLow.LsubCH == 4, 'selectionRequest: a lower-rate MCS must need more sub-channels for the same PDU, got %d', rLow.LsubCH);
+% And a policy with no table cannot select at all, rather than defaulting to something.
+noTbl = pol; noTbl.tbsBytesByLsubCH = zeros(1, 0);
+mustError(@() phy.rx.policy.selectionRequest(1000, 1, 200, 4, 5, noTbl, 350), 'policy:selectionRequest:noTbsTable', 'a policy with no TBS table');
 
 %% ---- pdbLogicalSlots: wall clock -> pool opportunities -----------------
 % On the baseline pool the conversion is the identity, which is exactly why the unit confusion
@@ -183,7 +211,7 @@ row = t([t.PQI] == 55);
 assert(remPhys == 100 && ~expired, 'chain: 200-slot budget with 100 elapsed leaves 100 physical slots, got %d', remPhys);
 [remLogical, nTrig] = phy.rx.policy.pdbLogicalSlots(loAlt, 1000, remPhys);
 assert(remLogical == 50, 'chain: 100 physical slots is 50 opportunities in a half pool, got %d', remLogical);
-[reqChain, feasChain] = phy.rx.policy.selectionRequest(nTrig, mu, remLogical, row.priority, 5, pol);
+[reqChain, feasChain] = phy.rx.policy.selectionRequest(nTrig, mu, remLogical, row.priority, 5, pol, probePdu);
 assert(feasChain, 'chain: 50 opportunities comfortably exceeds T_proc,1 = 5');
 assert(reqChain.T2 == 50 && reqChain.n == nTrig, 'chain: T2 must be the logical budget and n the logical trigger slot');
 % candidateSet accepts it, and every candidate lies inside the window.

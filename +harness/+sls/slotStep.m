@@ -153,7 +153,11 @@ if opp == 1
     if ~any(avail > 0)
         return;                                 % a reserved opportunity with nothing to send
     end
-    usable = scen.tbsBytes - scen.macOverheadBytes;
+    % The transport block is whatever THIS grant's L_subCH carries -- it varies per grant now
+    % that L_subCH is derived per selection, so a single scenario-wide TBS would be wrong for
+    % every grant but one.
+    tbsBytes = scen.tbsBytesByLsubCH(u.grant.lSubch);
+    usable   = tbsBytes - scen.macOverheadFixedBytes - scen.macOverheadPerSduBytes;
     [alloc, u.lch.Sbj, ~] = mac.slLcp(u.lch.Sbj, u.lch.prio, avail, u.lch.harqFeedbackEnabled, ...
         true(1, u.lch.nLch), usable);
     [u.lch, served] = sap.lchDequeue(u.lch, alloc);
@@ -162,7 +166,7 @@ if opp == 1
     end
     sduLen = [served.sizeBytes];
     pdu = mac.muxSlSch(u.srcL2Id, u.dstL2Id, uint8(zeros(1, sum(sduLen))), sduLen, ...
-        repmat(scen.traffic.lcid, 1, numel(served)), false, 0, 0, scen.tbsBytes);
+        repmat(scen.traffic.lcid, 1, numel(served)), false, 0, 0, tbsBytes);
     proc = mod(u.nextPktId, u.harq.nProcesses) + 1;
     [u.harq, ndi, rv] = mac.harqNewTransmission(u.harq, proc, [0 2 3 1], proc - 1, false);
     ndi = double(ndi);          % the HARQ entity keeps NDI as a logical toggle; the SCI field
@@ -289,7 +293,13 @@ end
 [lo, hi] = mac.creselCounterRange(scen.policy.prsvpTxMs);
 counter  = lo + floor(rand(scen.stream) * (hi - lo + 1));
 cresel   = mac.cresel(counter, true);
-[req, feasible] = phy.rx.policy.selectionRequest(nLog, scen.mu, remLogical, scen.traffic.prio, cresel, scen.policy);
+% Size the grant from the data actually pending, capped at the largest transport block the
+% pool can carry. Clause 5.22.1.1 selects "an amount of frequency resources"; this is that
+% amount, and phy.rx.policy.selectionRequest turns it into L_subCH through the TBS table.
+nSdu     = numel(u.lch.q);
+pduBytes = min(scen.maxTbsBytes, ...
+    scen.macOverheadFixedBytes + nSdu * scen.macOverheadPerSduBytes + sum(avail));
+[req, feasible] = phy.rx.policy.selectionRequest(nLog, scen.mu, remLogical, scen.traffic.prio, cresel, scen.policy, pduBytes);
 if ~feasible
     return;
 end

@@ -88,19 +88,37 @@ for L = 1:scen.numSubchannel
     tbsBytesByLsubCH(L) = floor(bits / 8);
 end
 
-% Measure the MAC PDU overhead for one SDU by building one at a size known to be generous.
+% MAC PDU overhead, measured rather than guessed, and separated into its fixed and per-SDU
+% parts. Clause 6.2.4 gives every subPDU its own subheader, so a PDU carrying two SDUs costs
+% more than one carrying one; a single measured constant would understate a multi-SDU PDU and
+% size the grant too small for it.
 probeBytes = tbsBytesByLsubCH(end);
-[~, nPad, nInc] = mac.muxSlSch(1, 2, uint8(zeros(1, scen.traffic.sizeBytes)), ...
-    scen.traffic.sizeBytes, scen.traffic.lcid, false, 0, 0, probeBytes);
-if nInc ~= 1
-    error('sls:scenarioInit:probeFailed', 'scenarioInit: could not measure MAC PDU overhead; the probe PDU carried %d SDUs', nInc);
+oh = zeros(1, 2);
+for nSdu = 1:2
+    len = repmat(scen.traffic.sizeBytes, 1, nSdu);
+    [~, nPad, nInc] = mac.muxSlSch(1, 2, uint8(zeros(1, sum(len))), len, ...
+        repmat(scen.traffic.lcid, 1, nSdu), false, 0, 0, probeBytes);
+    if nInc ~= nSdu
+        error('sls:scenarioInit:probeFailed', 'scenarioInit: the %d-SDU overhead probe carried %d SDUs', nSdu, nInc);
+    end
+    oh(nSdu) = probeBytes - sum(len) - nPad;
 end
-scen.macOverheadBytes = probeBytes - scen.traffic.sizeBytes - nPad;
+scen.macOverheadPerSduBytes = oh(2) - oh(1);
+scen.macOverheadFixedBytes  = oh(1) - scen.macOverheadPerSduBytes;
 
-scen.policy.LsubCH = phy.rx.policy.subchannelsForTbs( ...
-    scen.traffic.sizeBytes + scen.macOverheadBytes, tbsBytesByLsubCH);
-scen.tbsBytes = tbsBytesByLsubCH(scen.policy.LsubCH);
-scen.tbsBits  = scen.tbsBytes * 8;
+% L_subCH is NOT set here. It is derived per selection by phy.rx.policy.selectionRequest from
+% the MAC PDU actually pending, gated by this table at the chosen MCS -- so a UE with more
+% queued data selects a wider allocation, and no path can select one too small for its own
+% payload. All this scenario supplies is the table.
+scen.policy.tbsBytesByLsubCH = tbsBytesByLsubCH;
+scen.tbsBytesByLsubCH        = tbsBytesByLsubCH;
+scen.maxTbsBytes             = tbsBytesByLsubCH(end);
+
+% Sanity: one SDU must fit somewhere in the table, or no grant can ever carry this traffic.
+onePdu = scen.macOverheadFixedBytes + scen.macOverheadPerSduBytes + scen.traffic.sizeBytes;
+if onePdu > scen.maxTbsBytes
+    error('sls:scenarioInit:sduTooLarge', 'scenarioInit: a %d-byte MAC PDU (a %d-byte SDU plus overhead) does not fit even L_subCH = %d (%d bytes) at MCS %d', onePdu, scen.traffic.sizeBytes, scen.numSubchannel, scen.maxTbsBytes, scen.policy.mcs);
+end
 
 % ---- geometry: a line of UEs, stationary -----------------------------------
 scen.nUe   = nUe;

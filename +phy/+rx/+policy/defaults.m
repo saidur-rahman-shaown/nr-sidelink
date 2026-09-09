@@ -6,11 +6,21 @@ function p = defaults()
 %        function; the values travel into +phy/+ts38214/ and +mac/ as ordinary inputs.
 %Inputs: none
 %Outputs: p  scalar struct, the policy constants:
-%   .LsubCH          integer, >=1 -- L_subCH, contiguous sub-channels per candidate resource.
-%                    Default 2. This SHOULD be derived from the MAC PDU size via
-%                    phy.ts38214.tbsDetermine inverted against the pool's sub-channel size;
-%                    that module does not exist yet, so a constant stands in. Two sub-channels
-%                    of the usual 10 PRB carry a ~300-byte CAM at the default MCS with margin.
+%   .tbsBytesByLsubCH  1 x numSubchannel integer, bytes -- the transport block size for
+%                    L_subCH = 1, 2, ..., numSubchannel **at .mcs**, from
+%                    phy.ts38214.tbsDetermine. Empty here and REQUIRED to be filled by the
+%                    caller: clause 8.1.3.2 needs a dozen pool parameters this package has no
+%                    business holding, and the table is MCS-dependent so it cannot be a
+%                    constant either.
+%
+%   THERE IS NO .LsubCH FIELD, DELIBERATELY.
+%   L_subCH is not a policy constant. It is whatever the chosen MCS requires to carry the MAC
+%   PDU actually pending, so phy.rx.policy.selectionRequest derives it per selection via
+%   phy.rx.policy.subchannelsForTbs and there is no way to supply one blind. An earlier version
+%   of this file did carry a default of 2, and it was wrong twice over: a 300-byte CAM at MCS 7
+%   needs three sub-channels, not two, and nothing detected the shortfall -- the payload was
+%   simply transmitted at the wrong size. A constant here also silently decouples L_subCH from
+%   .mcs, so changing the MCS would leave the allocation stale.
 %   .mcs             integer, 0..31 -- I_MCS for PSSCH. Default 7: QPSK in every one of
 %                    clause 8.1.3.1's selectable tables. Broadcast sidelink has no CSI
 %                    feedback, so the MCS cannot track the channel and must instead close the
@@ -34,7 +44,7 @@ function p = defaults()
 %so a replacement needs no edit anywhere else.
 
 p = struct( ...
-    'LsubCH',         2, ...
+    'tbsBytesByLsubCH', zeros(1, 0), ...
     'mcs',            7, ...
     'prsvpTxMs',      100, ...
     'numRetx',        1, ...
