@@ -35,3 +35,7 @@ the expected shape. Round trip passes for every SCI format with a real receiver 
   necessary the interface is wrong; stop and say so rather than editing normative code.
 - Toolbox leakage upward. The `guard-norm` hook blocks the obvious cases; `module-auditor`
   catches the rest.
+
+## Built so far
+`+policy/` only — see `+phy/+rx/+policy/CLAUDE.md`. `+sync/`, `+ce/`, `+eq/` and `+det/` are
+still empty; B5 has not started.

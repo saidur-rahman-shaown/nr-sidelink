@@ -8,7 +8,10 @@ and back up at the receiver.
 
 ## Read these first
 - `BUILD.md` — the master build sequence B0…B11, the gate for each package, and the dependency
-  graph. This is the plan of record.
+  graph. This is the plan of record for the *packages*.
+- `INTEGRATION.md` — the plan of record for the *connections between them*: the frozen SAPs, the
+  phase order that closes the end-to-end loop, and where the latency and throughput KPIs come
+  from. Read with `BUILD.md`, not instead of it.
 - `.claude/rules/normative-packages.md` — what "normative" means here and the coding rules that
   follow from it (flat interfaces, no hidden state, no magic numbers, clause-cited headers).
 - `.claude/rules/portability.md` — the C/HDL port constraints (documented dynamic ranges,
@@ -31,6 +34,7 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
       +ts38215/  measurements: SL-RSRP, SL-RSSI, CBR, CR             (built)
       +chan/     PSBCH/PSCCH/PSSCH/PSFCH transmit chains             (planned, B4)
       +rx/       non-normative receiver                              (planned, B5)
+        +policy/ Mode-2 selection policy — T1/T2, S_A draw, PDB       (built)
       +lib/      wrapped generics (OFDM, polar SCL, LDPC, LLR)
     +mac/        38.321 §5.22 §6.1.6 — Mode-2 TX path                (B8, built)
     +rlc/ +pdcp/ +sdap/ +pc5s/ +app/   upper layers                  (planned, B9)
