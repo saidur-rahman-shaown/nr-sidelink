@@ -152,7 +152,7 @@ after the curves exist means regenerating all of them.
 *Done when:* the slot loop runs 1000 slots with stub layers, the ordering assertions pass, and a
 `ctx` created in `+app/` arrives back at `+app/` with every timestamp filled.
 
-### Phase 1 — close the loop with an abstracted PHY  — **DONE** (broadcast; unicast pending)
+### Phase 1 — close the loop with an abstracted PHY  — **DONE** (broadcast and unicast)
 The first real KPI. New: `+harness/+phyabs/` (an SINR → BLER lookup with a placeholder analytic
 curve), `+harness/+chanmodel/` at pathloss-plus-shadowing fidelity, `+app/trafficModel`, a
 minimum-viable `+rlc/` (UM, no segmentation), and `+mac/`'s **receive** side — clause 5.22.2 is
@@ -215,8 +215,8 @@ knob the optimisation work is aimed at, so Phase 1 measuring it is the point, no
    of the remaining work. If the deliverable is latency/throughput vs density and distance, a
    validated abstraction with published or analytically-derived BLER curves may be sufficient,
    with the waveform chain as later validation rather than a prerequisite.
-2. **Unicast with PSFCH/HARQ feedback, or broadcast only?** Feedback-driven retransmission
-   dominates the latency tail, and `+phy/+ts38213/` has the PSFCH resource machinery already.
-   Broadcast with blind retransmission is much less work and is the standard V2X assumption.
+2. ~~Unicast with PSFCH/HARQ feedback, or broadcast only?~~ **Settled: both.** Built —
+   `scenarioInit(..., 'unicast')` runs the full feedback loop through `+phy/+ts38213/`'s PSFCH
+   modules and `mac.harqOnFeedback`. Transmissions per delivery falls from 1.98 to 1.09.
 3. **Scenario scale.** The gate in `BUILD.md` says 50 UEs; the SLS cost is set by the sensing
    database and the per-slot link matrix, both of which are quadratic in UE count.

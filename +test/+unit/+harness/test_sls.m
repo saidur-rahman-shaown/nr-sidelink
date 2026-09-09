@@ -88,5 +88,51 @@ assert(k.txPerDelivery > 1.5 && k.txPerDelivery <= 2.5, ...
 scen2 = harness.sls.scenarioInit(4, 2);
 assert(phy.ts38214.procTimeSelection(scen2.mu) > 0, 'T_proc,1 must be positive, or the slot loop ordering is unsound');
 
+%% ---- unicast: PSFCH feedback closes the HARQ loop -----------------------
+% The whole point of feedback: an ACK stops the blind retransmission that broadcast must always
+% spend. Same policy, same traffic, same seed -- only the cast type differs.
+bc = harness.sls.run(20, 1600, 9, 'broadcast');
+uc = harness.sls.run(20, 1600, 9, 'unicast');
+assert(abs(bc.txPerDelivery - 2) < 0.15, 'broadcast must spend its blind retransmission every time, got %.2f', bc.txPerDelivery);
+assert(uc.txPerDelivery < 1.5, 'unicast ACKs must suppress most retransmissions, got %.2f', uc.txPerDelivery);
+assert(uc.txPerDelivery < bc.txPerDelivery, 'feedback must cost fewer transmissions per delivery than blind repetition');
+
+% PSFCH costs transport-block capacity, and that must be visible rather than free: clause
+% 8.1.3.2 subtracts the PSFCH symbols from N_RE, so every TB in the pool shrinks.
+sb = harness.sls.scenarioInit(4, 1, 'broadcast');
+su = harness.sls.scenarioInit(4, 1, 'unicast');
+assert(su.slPsfchPeriod > 0 && sb.slPsfchPeriod == 0, 'scenarioInit: PSFCH must be enabled for unicast and disabled for broadcast');
+assert(all(su.tbsBytesByLsubCH < sb.tbsBytesByLsubCH), 'enabling PSFCH must shrink every transport block; got %s vs %s', mat2str(su.tbsBytesByLsubCH), mat2str(sb.tbsBytesByLsubCH));
+
+%% ---- the DTX path, which drives radio link failure ----------------------
+% Peers far enough apart that no PSFCH is ever detected. Clause 5.22.1.3.3 counts ABSENCE, so
+% this is the case that must produce RLF -- and it is unreachable in the default scenario,
+% where the ring pairs each UE with its 20 m neighbour.
+far = harness.sls.scenarioInit(6, 5, 'unicast');
+far.spacingM = 1500;
+far.posXY = [(0:far.nUe - 1)' * far.spacingM, zeros(far.nUe, 1)];
+[kFar, ueFar] = harness.sls.runScenario(far, 1600);
+assert(kFar.nDelivered == 0, 'at 1500 m spacing nothing should decode, got %d deliveries', kFar.nDelivered);
+assert(kFar.nRlf == far.nUe, 'every UE must indicate radio link failure exactly once, got %d for %d UEs', kFar.nRlf, far.nUe);
+dtx = [];
+for i = 1:numel(ueFar)
+    dtx = [dtx ueFar(i).harq.numConsecutiveDTX]; %#ok<AGROW>
+end
+assert(max(dtx) > far.slMaxNumConsecutiveDTX, 'the DTX counter must keep rising past the threshold -- clause 5.22.1.3.3 never resets it on indication');
+% Indicated ONCE on the crossing, not on every subsequent DTX. +mac/CLAUDE.md records this as
+% the "reaches" reading; a >= reading would re-indicate every slot and give nRlf >> nUe.
+assert(kFar.nRlf < 2 * far.nUe, 'RLF must be indicated once per UE on the crossing, not repeatedly; got %d', kFar.nRlf);
+
+%% ---- every packet is accounted for, including in-flight ones ------------
+% A packet dequeued into a transport block has left the logical channel, so lchExpire cannot
+% see it. Without an in-flight expiry it sits unresolved forever and leaves the denominator of
+% every ratio -- which flatters reliability, and is invisible in a scenario where almost
+% everything is delivered. This is the scenario where almost nothing is.
+assert(kFar.nDelivered + kFar.nExpired + kFar.nMaxTx + kFar.nDropped + kFar.nInFlight == kFar.nGenerated, ...
+    'every generated packet must land in exactly one bucket: %d+%d+%d+%d+%d vs %d', ...
+    kFar.nDelivered, kFar.nExpired, kFar.nMaxTx, kFar.nDropped, kFar.nInFlight, kFar.nGenerated);
+assert(kFar.nExpired > 0, 'packets that were transmitted and never acknowledged must expire, not linger in flight');
+assert(kFar.nInFlight < far.nUe * 2, 'only the last generation may still be in flight, got %d', kFar.nInFlight);
+
 fprintf('test_sls: all assertions passed.\n');
 end

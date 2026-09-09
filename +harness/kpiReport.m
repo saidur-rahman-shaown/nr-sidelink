@@ -1,4 +1,4 @@
-function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxDistM, rxOk)
+function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxDistM, rxOk, nRlf)
 %kpiReport Latency, reliability and throughput from resolved packet contexts.
 %Spec:   none -- KPI definitions. They are the reason the tree exists, so each one states what
 %        it counts and, where it matters, what it deliberately does not.
@@ -11,6 +11,9 @@ function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxD
 %                        the receiver could hear at all (half-duplex slots excluded: a UE that
 %                        was transmitting did not fail to receive, it was never a link)
 %        rxOk            1 x nPair logical -- whether that pair's transport block decoded
+%        nRlf            integer -- radio link failures indicated, TS 38.321 clause 5.22.1.3.3.
+%                        Nonzero means links were dying, which every other KPI here averages
+%                        away: a dead link stops generating failures once its traffic stops
 %Outputs: kpi  scalar struct, documented per field below
 %
 %LATENCY IS REPORTED AS A DISTRIBUTION, NOT A MEAN
@@ -38,6 +41,8 @@ msPerSlot = 1 / 2^scen.mu;
 outcomes  = [resolved.outcome];
 delivered = resolved(outcomes == codes.delivered);
 expiredN  = nnz(outcomes == codes.pdbExpired);
+maxTxN    = nnz(outcomes == codes.maxTx);
+droppedN  = nnz(outcomes == codes.dropped);
 
 latencySlots = double([delivered.tRxSlot] - [delivered.tGenSlot]);
 latencyMs    = latencySlots * msPerSlot;
@@ -46,9 +51,17 @@ accessMs     = double([delivered.tTxSlot] - [delivered.tMacSlot]) * msPerSlot;
 kpi.nGenerated   = nGenerated;
 kpi.nDelivered   = numel(delivered);
 kpi.nExpired     = expiredN;
+% The outcome breakdown must be complete, or a bucket nobody counts becomes a bucket nobody
+% notices. maxTx is sl-MaxTransNum spent without an acknowledgement -- a loss with a different
+% cause from a spent PDB, and one that only exists once feedback does.
+kpi.nMaxTx       = maxTxN;
+kpi.nDropped     = droppedN;
 kpi.nResolved    = numel(resolved);
 kpi.nInFlight    = nGenerated - numel(resolved);
 kpi.prr          = kpi.nDelivered / max(1, kpi.nResolved);
+assert(kpi.nDelivered + expiredN + maxTxN + droppedN == kpi.nResolved, ...
+    'kpiReport: the outcome buckets must account for every resolved packet -- %d + %d + %d + %d vs %d', ...
+    kpi.nDelivered, expiredN, maxTxN, droppedN, kpi.nResolved);
 kpi.latencyMs    = latencyMs;
 kpi.latencyMeanMs = mean(latencyMs);
 kpi.latencyP50Ms = pct(latencyMs, 50);
@@ -88,6 +101,7 @@ for b = 1:numel(edges) - 1
 end
 kpi.prrLink = mean(rxOk);
 kpi.nPairs  = numel(rxOk);
+kpi.nRlf    = nRlf;
 end
 
 function v = pct(x, p)

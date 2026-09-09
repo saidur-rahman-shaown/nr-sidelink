@@ -68,6 +68,8 @@ with `+chanmodel/`, `+phyabs/` and `kpiReport`. `+lls/` and `+mobility/` are not
 | `+sls/ueInit` | per-UE state, aggregating each package's own state object |
 | `+sls/slotStep` | one slot for the whole scenario |
 | `+sls/run` | a whole run, returning KPIs |
+| `+sls/runScenario` | a run from a PREPARED scenario, so it can be edited first |
+| `+phyabs/psfchDetect` | PSFCH cyclic-shift detection probability, a **placeholder** |
 | `+chanmodel/pathlossDb` | log-distance **placeholder**, not a 3GPP model |
 | `+chanmodel/slotSinr` | per-link SINR for a slot, once for the whole scenario |
 | `+phyabs/blerLookup` | SINR → BLER, a **placeholder curve on the real key structure** |
@@ -93,6 +95,36 @@ Two orderings inside that are load-bearing:
   after the transmission raises on the first repeat of opportunity 1. It cost a debugging pass
   to find; it is a `periodPhase` call before `txPhase` now.
 
+### Unicast and PSFCH
+`scenarioInit(nUe, seed, 'unicast')` pairs UEs in a **ring** — UE i talks to UE i+1, the last to
+the first — so every UE is both transmitter and receiver and the feedback path is exercised in
+both directions on every UE. Disjoint pairs would leave half the population never receiving.
+
+The feedback loop is real, not abstracted away: `psfchTiming` picks the slot, `psfchPrbRange`
+and `psfchResource` pick the PRB and cyclic-shift pair, `psfchDetect` decides whether it is
+heard, and `mac.harqOnFeedback` applies the result. Measured effect: **transmissions per
+delivery falls from 1.98 to 1.09** against an otherwise identical broadcast run, because an ACK
+suppresses the blind retransmission that broadcast must always spend.
+
+- **PSFCH is not free, and the cost is visible.** Clause 8.1.3.2 subtracts the PSFCH symbols
+  from N_RE, so enabling feedback shrinks **every** transport block in the pool whether or not a
+  given transmission uses it: 372 → 233 bytes at L_subCH 3 here. The TBS table is computed with
+  the real period so that shows up rather than being assumed away.
+- **Half-duplex on PSFCH is per-SYMBOL, not per-slot.** A UE transmitting PSSCH in slot n can
+  still receive PSFCH in that slot — clause 8.1.2.1 forbids PSSCH in the symbols configured for
+  PSFCH, so the two never overlap. What a UE cannot do is transmit and receive PSFCH in the same
+  slot. The deafness test in `psfchPhase` is therefore "did I transmit a PSFCH", a narrower set
+  than the PSSCH test in `slotSinr`.
+- **PSFCH collisions are modelled.** Clause 16.3 allocates the PRB and cyclic-shift pair from
+  the PSSCH slot, sub-channel and source ID — not from who is replying — so two receivers
+  answering different transmitters can land on the same resource and become indistinguishable.
+  Treating PSFCH as a private channel would hide the one feedback failure mode that scales with
+  load.
+- **Feedback is owed on the CONTROL decode, not the data decode.** A NACK is precisely the
+  report that the SCI was seen and the transport block was not. Owing feedback only on success
+  would turn every data failure into a DTX — and DTX drives radio link failure (clause
+  5.22.1.3.3), not retransmission, so lossy-but-alive links would be declared dead.
+
 ### The two reliability figures, which are different numbers
 - **`kpi.prr` is packet-level:** a packet counts as delivered if *any* receiver decoded it.
   This is what closes a latency figure — a packet has one latency, not one per listener — and
@@ -114,8 +146,26 @@ perfect reliability over a channel that is failing most of its links.
 - **`blerLookup`** is a logistic whose midpoint rises with MCS. Right shape, invented numbers.
 - No fading, no shadowing, no antenna pattern.
 
+- **`psfchDetect`** is a logistic with a low midpoint and a steep slope, because a sequence
+  detector works at SINRs where no coded block would. Reusing `blerLookup` here would make
+  feedback fail at roughly the same range as data, which is exactly backwards. **Not modelled:**
+  false alarm, and the ACK/NACK confusion from detecting the wrong shift of the right sequence.
+  Both are real and asymmetric — a false ACK loses a packet silently, a false NACK only wastes a
+  retransmission — so a real curve must report them as a pair.
+
 **Comparisons between policies on the same channel are meaningful. Absolute PRR-versus-distance,
 latency and throughput numbers are not, until Phase 3 replaces both with measured curves.**
+
+### Every packet lands in exactly one bucket
+`kpiReport` asserts it. Delivered, PDB-expired, sl-MaxTransNum spent, dropped, or still in
+flight — and the last is reported separately and excluded from every ratio.
+
+The trap this closes: a packet dequeued into a transport block has **left the logical channel**,
+so `sap.lchExpire` can no longer see it. Without a second expiry pass over the in-flight set it
+sits unresolved forever and quietly leaves the denominator of every ratio, which flatters
+reliability. It is invisible in a scenario where almost everything is delivered — a 6-UE
+unicast run at 1500 m spacing reported 0 expired and 48 in flight before the fix, and 42
+expired plus 6 in flight after.
 
 `blerLookup`'s *interface* is not a placeholder: it takes all five table keys — MCS, SINR,
 retransmission index, channel model, speed — even though the body reads three, precisely so

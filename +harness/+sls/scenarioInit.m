@@ -1,9 +1,14 @@
-function scen = scenarioInit(nUe, seed)
+function scen = scenarioInit(nUe, seed, castLabel)
 %scenarioInit Build the baseline system-level scenario.
 %Spec:   none -- scenario configuration. Every 3GPP quantity in it is resolved through the
 %        package that owns it (poolSlotMap, mcsTableSelect, tbsDetermine, policy.defaults).
-%Inputs: nUe   integer, >=2 -- number of UEs
-%        seed  integer -- RNG seed. The ONE source of randomness in a run
+%Inputs: nUe        integer, >=2 -- number of UEs
+%        seed       integer -- RNG seed. The ONE source of randomness in a run
+%        castLabel  char, 'broadcast' (default) or 'unicast'. Unicast pairs each UE with the
+%                   next in a ring, enables HARQ feedback, and turns on PSFCH -- which changes
+%                   the transport block size, because clause 8.1.3.2 subtracts the PSFCH
+%                   symbols from N_RE. That coupling is why this is a scenario switch and not
+%                   a flag read at transmit time.
 %Outputs: scen  scalar struct, everything a slot step needs that does not change per slot
 %
 %A DELIBERATELY MINIMAL SCENARIO
@@ -17,9 +22,17 @@ function scen = scenarioInit(nUe, seed)
 %Every UE broadcasts, so nothing here exercises PSFCH. Unicast is supported by the SAPs and the
 %slot loop; the scenario that uses it is a separate constructor.
 
+if nargin < 3
+    castLabel = 'broadcast';
+end
 if ~(nUe >= 2 && mod(nUe, 1) == 0)
     error('sls:scenarioInit:badNUe', 'scenarioInit: nUe must be an integer >= 2, got %s', num2str(nUe));
 end
+if ~any(strcmp(castLabel, {'broadcast', 'unicast'}))
+    error('sls:scenarioInit:badCast', 'scenarioInit: castLabel must be ''broadcast'' or ''unicast'', got ''%s''', castLabel);
+end
+scen.castLabel = castLabel;
+scen.isUnicast = strcmp(castLabel, 'unicast');
 
 scen.mu            = 1;                  % 30 kHz SCS, the FR1 V2X numerology
 scen.slotsPerMs    = 2^scen.mu;
@@ -76,7 +89,21 @@ scen.traffic = struct( ...
 % the subheader widths are clause 6.2.4's and belong to that function.
 [~, Qm, R] = phy.ts38214.mcsTableSelect(scen.policy.mcs, '', 0);
 scen.slLengthSymbols = 12;
-scen.slPsfchPeriod   = 0;                % PSFCH disabled in the broadcast baseline
+% PSFCH costs transport-block capacity: clause 8.1.3.2 subtracts the PSFCH symbols from N_RE,
+% so enabling feedback shrinks every TB in the pool whether or not a given transmission uses
+% it. Computing the TBS table with the real period is what makes that cost visible rather than
+% free.
+if scen.isUnicast
+    scen.slPsfchPeriod = 1;              % sl-PSFCH-Period: a PSFCH occasion every pool slot
+else
+    scen.slPsfchPeriod = 0;              % disabled in the broadcast baseline
+end
+scen.minTimeGapPsfch = 2;                % sl-MinTimeGapPSFCH, in pool slots
+scen.psfchRbSetSize  = scen.numSubchannel * max(1, scen.slPsfchPeriod);  % M_PRB,set^PSFCH
+scen.psfchNumMuxCsPair = 6;              % sl-NumMuxCS-Pair, N_CS^PSFCH
+scen.psfchNtype        = 1;              % sl-PSFCH-CandidateResourceType = startSubCH
+scen.slMaxTransNum             = 1 + scen.policy.numRetx + 2;
+scen.slMaxNumConsecutiveDTX    = 4;
 nReSci1 = 2 * scen.subchSizeRb * 12;     % PSCCH: 2 symbols over one sub-channel's PRBs
 
 tbsBytesByLsubCH = zeros(1, scen.numSubchannel);
@@ -84,7 +111,7 @@ for L = 1:scen.numSubchannel
     nPrbAlloc = L * scen.subchSizeRb;
     nReSci2   = 2 * nPrbAlloc;           % 2nd-stage SCI, a modest fixed share of the allocation
     bits = phy.ts38214.tbsDetermine(Qm, R, 1, nPrbAlloc, scen.slLengthSymbols, ...
-        scen.slPsfchPeriod, false, 0, [2 3], nReSci1, nReSci2);
+        scen.slPsfchPeriod, scen.slPsfchPeriod > 0, 0, [2 3], nReSci1, nReSci2);
     tbsBytesByLsubCH(L) = floor(bits / 8);
 end
 

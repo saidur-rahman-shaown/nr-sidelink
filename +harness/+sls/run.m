@@ -1,9 +1,10 @@
-function [kpi, ue, scen] = run(nUe, nSlots, seed)
+function [kpi, ue, scen] = run(nUe, nSlots, seed, castLabel)
 %run Execute a system-level scenario and return its KPIs.
 %Spec:   none -- the simulator's top level.
 %Inputs: nUe     integer, >=2
 %        nSlots  integer, >=1 -- PHYSICAL slots to execute
 %        seed    integer -- reproduces a run exactly
+%        castLabel  char, 'broadcast' (default) or 'unicast'
 %Outputs: kpi   from +harness/kpiReport
 %         ue    final per-UE state, for inspection
 %         scen  the scenario, including its advanced RNG stream
@@ -13,24 +14,9 @@ function [kpi, ue, scen] = run(nUe, nSlots, seed)
 %flight leaves the denominator, and that is the arithmetic that makes a reliability figure
 %look better than the run was.
 
-scen = harness.sls.scenarioInit(nUe, seed);
-ue   = harness.sls.ueInit(1, scen);
-for i = 2:nUe
-    ue(i) = harness.sls.ueInit(i, scen);
+if nargin < 4
+    castLabel = 'broadcast';
 end
-
-resolved = repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0);
-nTx      = 0;
-rxDist   = zeros(1, 0);
-rxOk     = false(1, 0);
-for n = 0:nSlots - 1
-    [ue, scen, done, air, rxLog] = harness.sls.slotStep(ue, scen, n);
-    resolved = [resolved done];  %#ok<AGROW>
-    nTx      = nTx + numel(air);
-    rxDist   = [rxDist rxLog.distM];  %#ok<AGROW>
-    rxOk     = [rxOk rxLog.ok];       %#ok<AGROW>
-end
-
-nGenerated = sum([ue.nextPktId]) - nUe;      % nextPktId starts at 1 on every UE
-kpi = harness.kpiReport(resolved, nGenerated, nSlots, scen, nTx, rxDist, rxOk);
+scen = harness.sls.scenarioInit(nUe, seed, castLabel);
+[kpi, ue, scen] = harness.sls.runScenario(scen, nSlots);
 end

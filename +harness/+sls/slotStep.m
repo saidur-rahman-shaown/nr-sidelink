@@ -1,4 +1,4 @@
-function [ue, scen, resolved, air, rxLog] = slotStep(ue, scen, nPhys)
+function [ue, scen, resolved, air, rxLog, nRlf] = slotStep(ue, scen, nPhys)
 %slotStep Advance the whole scenario by one slot.
 %Spec:   none itself; it sequences modules that each cite their own clause. The intra-slot
 %        ordering is +harness/CLAUDE.md's, with one documented reordering -- see below.
@@ -10,7 +10,8 @@ function [ue, scen, resolved, air, rxLog] = slotStep(ue, scen, nPhys)
 %         resolved  1 x n struct array of contexts that reached a terminal outcome this slot
 %         air       1 x nTx struct array of what was transmitted, for logging
 %         rxLog     scalar struct: .distM and .ok, one entry per (transmission, hearing
-%                   receiver) PAIR. This is the raw material for PRR-versus-distance, which is
+%         nRlf      integer -- radio link failures indicated this slot (clause 5.22.1.3.3)
+%         rxLog fields, continued: one entry per (transmission, hearing receiver) PAIR. This is the raw material for PRR-versus-distance, which is
 %                   a per-LINK statistic and cannot be recovered from packet outcomes -- see
 %                   +harness/kpiReport
 %
@@ -38,6 +39,7 @@ codes    = sap.outcomeCodes();
 resolved = repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0);
 nUe      = scen.nUe;
 rxLog    = struct('distM', zeros(1, 0), 'ok', false(1, 0));
+nRlf     = 0;
 
 % ---- 1. TIMING ------------------------------------------------------------
 nLog = scen.logicalOfPhys(nPhys + 1);
@@ -57,10 +59,27 @@ for i = 1:nUe
     end
 end
 
-% ---- 3. EXPIRE: a spent budget is a LOSS ----------------------------------
+% ---- 3. EXPIRE: a spent budget is a LOSS, wherever the packet is ----------
+% Both the queue AND the in-flight set. A packet dequeued into a transport block has left the
+% logical channel, so lchExpire can no longer see it -- and without the second loop it would
+% sit in flight forever if the block were never delivered, silently leaving the denominator of
+% every ratio. That is precisely the arithmetic that makes a reliability figure look better
+% than the run was, and it is invisible in a scenario where almost everything is delivered.
 for i = 1:nUe
     [ue(i).lch, dead] = sap.lchExpire(ue(i).lch, nPhys, scen.mu);
     resolved = [resolved dead];  %#ok<AGROW>
+
+    stillFlying = true(1, numel(ue(i).inFlight));
+    for f = 1:numel(ue(i).inFlight)
+        [~, spent] = phy.rx.policy.remainingPdbSlots(ue(i).inFlight(f).pdbMs, ...
+            ue(i).inFlight(f).tGenSlot, nPhys, scen.mu);
+        if spent
+            resolved(end + 1) = sap.ctxFinish(ue(i).inFlight(f), codes.pdbExpired, nPhys); %#ok<AGROW>
+            stillFlying(f) = false;
+        end
+    end
+    ue(i).inFlight     = ue(i).inFlight(stillFlying);
+    ue(i).inFlightProc = ue(i).inFlightProc(stillFlying);
 end
 
 % ---- 4. TX ----------------------------------------------------------------
@@ -121,15 +140,159 @@ for i = 1:nUe
             if gotTb
                 [ue, resolved] = deliver(ue, resolved, air(k), nPhys, codes);
             end
+            % Feedback is owed on the strength of the CONTROL decode, not the data decode: a
+            % NACK is precisely the report that the SCI was seen and the transport block was
+            % not. Owing feedback only on success would turn every data failure into a DTX,
+            % and DTX drives radio link failure (clause 5.22.1.3.3) rather than
+            % retransmission -- so lossy-but-alive links would be declared dead.
+            if scen.isUnicast && air(k).harqFeedbackEnabled == 1 && air(k).dstL2Id == ue(i).srcL2Id
+                ue(i).psfchTx(end + 1) = struct( ...
+                    'slot',       phy.ts38213.psfchTiming(nLog, scen.minTimeGapPsfch, scen.slPsfchPeriod), ...
+                    'toUeId',     air(k).ueId, ...
+                    'ack',        gotTb, ...
+                    'procIdx',    air(k).harqId + 1, ...
+                    'psschSlot',  nLog, ...
+                    'startSubch', air(k).startSubch, ...
+                    'srcL1Id',    mod(air(k).srcL2Id, 256));
+            end
         end
         rxLog.distM(end + 1) = dist;
         rxLog.ok(end + 1)    = gotTb;
     end
 end
 
-% ---- 7. MAC: period boundaries, then the reselection check ----------------
+% ---- 7. PSFCH: transmit the feedback due here, and apply what comes back --
+if scen.isUnicast
+    [ue, scen, nRlf, fbResolved] = psfchPhase(ue, scen, nLog, nPhys);
+    resolved = [resolved fbResolved];
+end
+
+% ---- 8. MAC: period boundaries, then the reselection check ----------------
 for i = 1:nUe
     [ue(i), scen] = macPhase(ue(i), scen, nLog, periodLogical);
+end
+end
+
+% =========================================================================
+function [ue, scen, nRlf, resolvedFb] = psfchPhase(ue, scen, nLog, nSlotPhys)
+%psfchPhase Transmit every PSFCH due in this slot and apply the feedback that arrives.
+%Spec:   TS 38.213 V16.17.0 clause 16.3 for the slot, PRB and cyclic-shift-pair allocation
+%        (via psfchTiming/psfchPrbRange/psfchResource) and TS 38.321 clause 5.22.1.3.1/.3.3 for
+%        what the transmitter does with the result (via mac.harqOnFeedback).
+%
+%HALF-DUPLEX ON PSFCH IS PER-SYMBOL, NOT PER-SLOT
+%-------------------------------------------------
+%A UE transmitting PSSCH in slot n can still receive PSFCH in the same slot -- clause 8.1.2.1
+%forbids PSSCH in the symbols configured for PSFCH, so the two never overlap in time. What a UE
+%cannot do is transmit and receive PSFCH in the same slot. So the deafness test here is
+%"did I transmit a PSFCH", not "did I transmit anything", which is a different and narrower set
+%than the PSSCH half-duplex test in slotSinr.
+%
+%COLLISIONS ARE REAL AND ARE MODELLED
+%-------------------------------------
+%Two receivers replying to different transmitters can land on the same PRB and the same
+%cyclic-shift pair -- clause 16.3's allocation is a function of the PSSCH slot, sub-channel and
+%source ID, not of who is replying. Feedback sharing a resource is indistinguishable, so those
+%transmissions interfere. Modelling PSFCH as a private channel would hide the one failure mode
+%that scales with load.
+
+nRlf       = 0;
+nMaxTx     = 0;  %#ok<NASGU>
+codes      = sap.outcomeCodes();
+resolvedFb = repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0);
+
+% ---- gather this slot's PSFCH transmissions ------------------------------
+txUe = zeros(1, 0); txPrb = zeros(1, 0); txCs = zeros(1, 0);
+txTo = zeros(1, 0); txAck = false(1, 0); txProc = zeros(1, 0);
+for i = 1:numel(ue)
+    due = [ue(i).psfchTx.slot] == nLog;
+    for e = find(due)
+        p = ue(i).psfchTx(e);
+        iSlot = mod(p.psschSlot, scen.slPsfchPeriod);
+        [prbStart, ~, MsubchSlot] = phy.ts38213.psfchPrbRange(iSlot, p.startSubch, ...
+            scen.psfchRbSetSize, scen.numSubchannel, scen.slPsfchPeriod);
+        % M_ID is 0 for unicast (clause 16.3: it is the member identity only for groupcast
+        % with per-UE ACK/NACK).
+        [prb, cs] = phy.ts38213.psfchResource(prbStart, MsubchSlot, scen.psfchNtype, ...
+            scen.psfchNumMuxCsPair, p.srcL1Id, 0);
+        txUe(end + 1) = i;        %#ok<AGROW>
+        txPrb(end + 1) = prb;     %#ok<AGROW>
+        txCs(end + 1) = cs;       %#ok<AGROW>
+        txTo(end + 1) = p.toUeId; %#ok<AGROW>
+        txAck(end + 1) = p.ack;   %#ok<AGROW>
+        txProc(end + 1) = p.procIdx; %#ok<AGROW>
+    end
+    ue(i).psfchTx = ue(i).psfchTx(~due);
+end
+
+isPsfchTx = false(1, numel(ue));
+isPsfchTx(txUe) = true;
+
+% ---- received power of each PSFCH at each UE, over ONE PRB ---------------
+nPsfch = numel(txUe);
+if nPsfch > 0
+    prbBwHz = 12 * 15e3 * 2^scen.mu;                 % one PRB: 12 subcarriers
+    noiseMw = 10^(rf.noiseFloorDbm(prbBwHz, scen.radio.noiseFigureDb) / 10);
+    rxMw    = zeros(nPsfch, numel(ue));
+    for k = 1:nPsfch
+        d  = sqrt(sum((scen.posXY - scen.posXY(txUe(k), :)).^2, 2))';
+        pl = harness.chanmodel.pathlossDb(d, scen.radio.fcHz, scen.radio.plExponent, scen.radio.plRefDistM);
+        rxMw(k, :) = 10.^((scen.pCmaxDbm - pl) / 10);
+    end
+end
+
+% ---- apply the feedback each waiting transmitter should hear -------------
+for i = 1:numel(ue)
+    waiting = [ue(i).psfchWait.slot] == nLog;
+    for w = find(waiting)
+        proc = ue(i).psfchWait(w).procIdx;
+        ack  = false;
+        received = false;
+        if nPsfch > 0 && ~isPsfchTx(i)
+            k = find(txTo == i & txProc == proc, 1);
+            if ~isempty(k)
+                % Interference: any other PSFCH on the same PRB and cyclic-shift pair is
+                % indistinguishable from this one.
+                same = (txPrb == txPrb(k)) & (txCs == txCs(k));
+                same(k) = false;
+                interfMw = sum(rxMw(same, i), 1);
+                sinrDb   = 10 * log10(rxMw(k, i) / (noiseMw + interfMw));
+                if rand(scen.stream) < harness.phyabs.psfchDetect(sinrDb)
+                    received = true;
+                    ack      = txAck(k);
+                end
+            end
+        end
+        % A PSFCH that was never transmitted, never detected, or arrived while this UE was
+        % itself transmitting PSFCH is a DTX -- absence, which clause 5.22.1.3.3 counts toward
+        % radio link failure, and which is NOT the same as a NACK.
+        [ue(i).harq, flushed, rlf] = mac.harqOnFeedback(ue(i).harq, proc, ack, received, ...
+            scen.slMaxTransNum, scen.slMaxNumConsecutiveDTX);
+        % Clause 5.22.1.3.3 indicates RLF exactly once, on the crossing. Counted rather than
+        % acted on: RRC releases the connection on it, and there is no RRC here.
+        nRlf = nRlf + double(rlf);
+        if flushed
+            % The buffer is gone, so no further retransmission of this TB can happen. Clearing
+            % curTb is what makes harqRetransmission return `ignored` on the next reserved
+            % opportunity -- the normative outcome, not an error.
+            if ue(i).curProc == proc
+                ue(i).curTb = false(0, 1);
+            end
+            % A flush WITHOUT an ACK is sl-MaxTransNum spent: the packets riding this process
+            % are lost and must be resolved as such. A flush WITH an ACK has already had them
+            % resolved as delivered at the receiver's decode, so nothing is left to find.
+            if ~ack
+                onProc = ue(i).inFlightProc == proc;
+                for f = find(onProc)
+                    nMaxTx = nMaxTx + 1;
+                    resolvedFb(end + 1) = sap.ctxFinish(ue(i).inFlight(f), codes.maxTx, nSlotPhys); %#ok<AGROW>
+                end
+                ue(i).inFlight     = ue(i).inFlight(~onProc);
+                ue(i).inFlightProc = ue(i).inFlightProc(~onProc);
+            end
+        end
+    end
+    ue(i).psfchWait = ue(i).psfchWait(~waiting);
 end
 end
 
@@ -212,11 +375,29 @@ t.ndi          = double(ndi);
 t.rv           = rv;
 t.srcL2Id      = u.srcL2Id;
 t.dstL2Id      = u.dstL2Id;
-t.castType     = sap.castTypes().broadcast;
+if scen.isUnicast
+    t.castType            = sap.castTypes().unicast;
+    t.harqFeedbackEnabled = 1;
+else
+    t.castType            = sap.castTypes().broadcast;
+    t.harqFeedbackEnabled = 0;
+end
 t.prioTx       = scen.traffic.prio;
 t.txPowerDbm   = phy.ts38213.slPowerControl('PSSCH', scen.pCmaxDbm, 0, 0, 0, scen.mu, t.LsubCH * scen.subchSizeRb);
 t.ctxIds       = [u.curCtx.pktId];
 sent           = true;
+
+% Register the PSFCH this transmission expects back. Clause 16.3 fixes the slot: the first
+% PSFCH-bearing pool slot at or after sl-MinTimeGapPSFCH. Registered on EVERY transmission,
+% including retransmissions, because each one is separately acknowledged -- an ACK for the
+% first attempt must be able to stop the second.
+if scen.isUnicast
+    w = struct( ...
+        'slot',     phy.ts38213.psfchTiming(nLog, scen.minTimeGapPsfch, scen.slPsfchPeriod), ...
+        'fromUeId', u.peerUeId, ...
+        'procIdx',  u.curProc);
+    u.psfchWait(end + 1) = w;
+end
 end
 
 % =========================================================================
