@@ -51,9 +51,10 @@ later change is then validated by whether the KPI moves in a way you can explain
 Six structs. Flat, scalar or array, per `.claude/rules/normative-packages.md`. Once frozen,
 changing one is a cross-package event that gets discussed, not an edit.
 
-### 1. `ctx` — the packet context
+### 1. `ctx` — the packet context  — **BUILT**, in `+sap/`
 Created once in `+app/`, threaded through every SAP **unchanged except for appending
-timestamps**. This is the latency measurement, and it must exist before anything else is built —
+timestamps**. Lives in a top-level `+sap/` package that depends on nothing, so every layer can
+depend on it without a cycle; see `+sap/CLAUDE.md`. This is the latency measurement, and it must exist before anything else is built —
 retrofitting per-packet instrumentation into a working stack is the step that always fails.
 
     pktId       uint32   unique, monotonic per UE
@@ -128,12 +129,15 @@ No algorithms. The six structs above, constructors and validators for each, and
 `+harness/+sls/slotLoop.m` running the exact intra-slot ordering already specified in
 `+harness/CLAUDE.md`, with every layer a stub that returns a well-formed empty result.
 
-**Blocker to clear here:** the **logical ↔ physical slot mapping does not exist anywhere in
-this tree.** `+phy/+ts38214/` declares itself the logical side and never converts;
-`+phy/+ts38213/CLAUDE.md` lists `slotIsInPool` and the pool timeline in its own "Not built".
-Every module downstream of a resource pool needs it, and nothing can be integrated without it.
-It belongs in `+phy/+ts38213/` (clause 16.1, the pool/slot determination) and must be applied
-**exactly once**, with the other side asserting it did not repeat — `.claude/rules/portability.md`.
+**Blocker cleared here:** the **logical ↔ physical slot mapping did not exist anywhere in this
+tree.** `+phy/+ts38214/` declares itself the logical side and never converts;
+`+phy/+ts38213/CLAUDE.md` listed `slotIsInPool` in its own "Not built", noting it was "not
+found in clause 16.1/16.3/16.4's own text". That note was right, and the reason is that the
+pool slot set is **not in TS 38.213 at all** — it is defined in the **TS 38.214 clause 8
+preamble**, alongside the sub-channel definition `+phy/+ts38214/subchannelMap` already
+implements. Built as `+phy/+ts38214/poolSlotMap`, which returns both directions of the map
+from one pass, so the conversion is applied **exactly once** and the two directions cannot
+disagree — `.claude/rules/portability.md`.
 
 Also decided here, not later: the **BLER table key structure** (MCS, SINR, channel model,
 speed, retransmission index at minimum). `+harness/CLAUDE.md` is right that adding a dimension

@@ -8,7 +8,7 @@ here = fileparts(mfilename('fullpath'));   % .../+test
 root = fileparts(here);                    % repo root
 addpath(root);
 
-runners = {@test.runPhyTests, @test.runMacTests};
+runners = {@test.runPhyTests, @test.runMacTests, @test.runSapTests};
 
 nFail = 0;
 t0 = tic;

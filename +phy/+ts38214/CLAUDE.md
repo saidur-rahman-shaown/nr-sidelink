@@ -52,6 +52,46 @@ Build order followed: `subchannelMap` → `mcsTableSelect`/`tbsDetermine` → `p
 `procTimeSelection`/`reservationPeriodToSlots` → `sensingDb*` → `candidateSet` →
 `procTimeCongestion`/`cbrRangeIndex`/`congestionControlCheck`.
 
+## `poolSlotMap` — the logical<->physical slot mapping (added after the original module list)
+The pool slot set is defined in the **clause 8 preamble**, not in TS 38.213 clause 16.1.
+`+phy/+ts38213/CLAUDE.md` had listed a `slotIsInPool` as "not found in clause 16.1/16.3/16.4's
+own text" — that observation was right, and this is why: the definition lives here, beside the
+sub-channel definition `subchannelMap` implements. `poolSlotMap` builds both directions of the
+map in one pass and returns both, so `.claude/rules/portability.md`'s "applied exactly once" is
+structural rather than a convention: there is one array, and `logicalOfPhys(n+1) >= 0` is the
+`slotIsInPool` predicate.
+
+An independent-verifier pass over the clause (PDF only, blind to the code) **agreed on every
+value** of the worked example — N_S-SSB, N_nonSL, L, the reconstructed floor-quotient,
+N_reserved, all twelve reserved indices, T'max, the first five pool slots and all six
+`logicalOfPhys` probes. It found one real defect and flagged one genuine ambiguity:
+
+- **`T_max` is overloaded and the obvious shorthand is wrong.** In the clause, T_max is the size
+  of `(t^SL_0, ..., t^SL_{T_max-1})` — the count *after* the S-SSB, non-SL and reserved
+  exclusions but *before* the bitmap (9140 in the worked example). The DFN period `10240*2^mu`
+  is a different quantity the clause never names (10240 in the same example). The first version
+  of this module called the DFN period `Tmax`, which made the mask length and the clause's
+  T_max look like one thing. Renamed to `nDfnSlots`; only `T'max` is returned under a spec
+  symbol.
+- **The S-SSB / non-SL overlap accounting is ambiguous in the clause** (see `pending-human`).
+
+## Known traps in `poolSlotMap`
+- **The reserved slots are not decoration.** Exclusion 3 removes exactly `L mod L_bitmap` slots
+  so that what remains is an exact multiple of the bitmap length. Skip it and the bitmap phase
+  slips by that remainder at every DFN wrap, so the pool drifts against its own configuration
+  once every 10.24 s — with no error anywhere. The module asserts the multiple.
+- **`r = floor(m * L / N_reserved)` is a product over a QUOTIENT.** Read from
+  `Documentations/38214-gh0.pdf`: pdftotext splits this fraction across three lines with the
+  floor bars on the middle one. Same class of failure as the lost division bar
+  `+mac/CLAUDE.md` records in TS 38.321 clause 5.22.1.1. The test names the twelve resulting
+  physical slots explicitly, so a product reading fails immediately.
+- **`m` starts at 0, so `l_0` is always reserved whenever N_reserved > 0.** The N_reserved = 0
+  case is therefore the *only* one in which physical slot 0 can be in the pool. Both cases are
+  tested; the boundary is invisible otherwise.
+- **The reserved index `r` indexes `(l_0, l_1, ...)`, not physical slots.** `l` is the sequence
+  that already survived the S-SSB and non-SL exclusions. Applying `r` to physical slot numbers
+  removes the wrong slots and still produces a plausible, correctly-sized pool.
+
 ## Design decisions made while building (read before extending this package)
 - **Logical slots only.** Every slot quantity `candidateSet`/`sensingDb*` touch (trigger slot
   `n`, sensed-SCI slots, window bounds) is a TS 38.214 clause-8 logical pool slot index. The
@@ -237,3 +277,17 @@ for this pass.
   steps 4/5/5a each round is redundant work (their result is threshold-independent) but is
   what the spec literally describes, and skipping the restart would misreport the escalation
   count. `candidateSet` re-derives `alive` from scratch every loop iteration for this reason.
+
+## `pending-human` — `poolSlotMap` overlap accounting
+The clause states the exclusion as a set difference ("the set includes all the slots except the
+following slots") but writes the surviving count arithmetically as
+`10240*2^mu - N_S-SSB - N_nonSL`, which equals the set difference only if the two sets are
+**disjoint**. They are disjoint physically — S-SSB is transmitted in slots configured for
+sidelink, so an S-SSB slot is never a non-sidelink slot — and the independent-verifier pass
+reached the same reading, but neither of us can point at text that says so.
+
+`poolSlotMap` resolves this by **refusing the input**: overlapping masks raise
+`ts38214:poolSlotMap:maskOverlap` rather than silently picking one of the two readings. That is
+strictly safer than either, since a caller that produces an overlap has a bug in its S-SSB or
+TDD derivation, not a pool question. Revisit if a configuration is ever found that legitimately
+overlaps them.

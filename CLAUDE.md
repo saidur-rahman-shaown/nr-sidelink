@@ -36,6 +36,7 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
       +rx/       non-normative receiver                              (planned, B5)
         +policy/ Mode-2 selection policy — T1/T2, S_A draw, PDB       (built)
       +lib/      wrapped generics (OFDM, polar SCL, LDPC, LLR)
+    +sap/        cross-layer SAP structs; the packet context and KPIs (built)
     +mac/        38.321 §5.22 §6.1.6 — Mode-2 TX path                (B8, built)
     +rlc/ +pdcp/ +sdap/ +pc5s/ +app/   upper layers                  (planned, B9)
     +harness/    link-level and system-level simulation              (planned, B10)
@@ -77,3 +78,4 @@ example, or a module lacking a test file.
     matlab -batch "test.runAllTests"     % all packages
     matlab -batch "test.runPhyTests"     % +phy/
     matlab -batch "test.runMacTests"     % +mac/
+    matlab -batch "test.runSapTests"     % +sap/

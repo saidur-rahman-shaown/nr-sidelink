@@ -19,8 +19,14 @@ Structure, timing, sync, and power. Partially parallel with `+chan/`.
 | `mode2ResourceSelect` | 16.4 | Mode-2 resource set → `(N,t1,t2,nStart1,nStart2)`, feeds `trivEncode`/`frivEncode` directly. **Mode 2 only** — Mode 1 (network-scheduled) is out of scope, no `+cfg/` fields exist for it yet. |
 
 Not built, and not found in clause 16.1/16.3/16.4's own text despite appearing in this
-package's earlier module list: `slotIsInPool`, `pscchCandidates`, `syncRefSelect`,
-`dfnFromGnss`. `syncRefSelect` and `dfnFromGnss` in particular look like they actually cite TS
+package's earlier module list: `pscchCandidates`, `syncRefSelect`, `dfnFromGnss`.
+
+**`slotIsInPool` is resolved and is not this package's.** The reason it could not be found in
+clause 16 is that the sidelink resource pool slot set is defined in the **TS 38.214 clause 8
+preamble**, beside the sub-channel definition. It is built as `+phy/+ts38214/poolSlotMap`,
+which returns both directions of the logical<->physical map; the predicate is
+`logicalOfPhys(n+1) >= 0`. This package supplies the *inputs* to it — `sSsbSlotIndex` for the
+S-SSB slots and `slTddConfigDecode` for the non-sidelink ones — and nothing more. `syncRefSelect` and `dfnFromGnss` in particular look like they actually cite TS
 38.331 (RRC sidelink sync procedures), not TS 38.213 — flagged rather than silently built or
 dropped; revisit with an explicit ask before touching them.
 
