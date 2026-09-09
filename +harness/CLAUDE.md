@@ -58,7 +58,71 @@ animated scenario view shows per-UE resource occupancy and live PRR.
 - Channel model wrapped means wrapped. No toolbox call escapes `+chanmodel/`.
 
 ## Built so far
-`poolAllSlots` only — the baseline Mode-2 resource pool, in which **every slot of the DFN
+The system-level path runs end to end: `+sls/scenarioInit` → `ueInit` → `slotStep` → `run`,
+with `+chanmodel/`, `+phyabs/` and `kpiReport`. `+lls/` and `+mobility/` are not built.
+
+| Module | What it does |
+|---|---|
+| `poolAllSlots` | the baseline pool — every slot a sidelink slot |
+| `+sls/scenarioInit` | the scenario; derives L_subCH and TBS from the real clause-8 arithmetic |
+| `+sls/ueInit` | per-UE state, aggregating each package's own state object |
+| `+sls/slotStep` | one slot for the whole scenario |
+| `+sls/run` | a whole run, returning KPIs |
+| `+chanmodel/pathlossDb` | log-distance **placeholder**, not a 3GPP model |
+| `+chanmodel/slotSinr` | per-link SINR for a slot, once for the whole scenario |
+| `+phyabs/blerLookup` | SINR → BLER, a **placeholder curve on the real key structure** |
+| `kpiReport` | latency, reliability, throughput |
+
+### The intra-slot order, and the one place it departs from the list above
+The list at the top of this file is the right order **for one UE**. A slot-synchronous
+multi-UE simulator cannot use it literally: no UE's reception can be evaluated until every
+UE's transmission for that slot exists. `slotStep` therefore runs
+
+    TIMING -> APP -> EXPIRE -> TX -> CHANNEL -> RX -> MAC -> LOG
+
+and preserves the per-UE order *in effect* rather than literally, because clause 8.1.4
+guarantees `T1 >= T_proc,1 > 0`: a MAC decision taken in slot n can never produce a
+transmission in slot n. Everything transmitted was decided at least T_proc,1 slots earlier, so
+running TX first cannot let a UE react to something it has not yet heard.
+
+Two orderings inside that are load-bearing:
+- **EXPIRE before TX**, so a grant is never spent on data that is already dead.
+- **The reservation period closes before the transmission that opens the next one.**
+  `mac.grantOnTransmission` rejects marking an opportunity twice in a period — correctly, that
+  is how a counter decrementing at the wrong rate gets caught — so a period boundary processed
+  after the transmission raises on the first repeat of opportunity 1. It cost a debugging pass
+  to find; it is a `periodPhase` call before `txPhase` now.
+
+### The two reliability figures, which are different numbers
+- **`kpi.prr` is packet-level:** a packet counts as delivered if *any* receiver decoded it.
+  This is what closes a latency figure — a packet has one latency, not one per listener — and
+  it is the weakest possible reliability statement. In any dense scenario it reads **1.0
+  regardless of the channel**, because the nearest neighbour always decodes. A 50-UE run over a
+  channel whose links fail past 400 m still reports `prr = 1.0000`.
+- **`kpi.prrByDistance` / `kpi.prrLink` are per-link:** of the receivers that could have heard a
+  transmission, what fraction did. Half-duplex slots are excluded from the denominator — a UE
+  that was transmitting did not *fail* to receive, it was never a link.
+
+Both are reported and never conflated. Reporting only the first is how a simulator claims
+perfect reliability over a channel that is failing most of its links.
+
+### What is a placeholder, stated so no result is misread
+- **`pathlossDb`** is log-distance with an exposed exponent. TR 37.885 — which carries the V2X
+  models this should use — has **no local PDF**; `+cfg/specVersions.json` lists TS37885 among
+  the unverified placeholders, so transcribing one from recall would only make it look
+  authoritative. Same discipline `+cfg/pqiTable.m` applies to its TS 23.287 rows.
+- **`blerLookup`** is a logistic whose midpoint rises with MCS. Right shape, invented numbers.
+- No fading, no shadowing, no antenna pattern.
+
+**Comparisons between policies on the same channel are meaningful. Absolute PRR-versus-distance,
+latency and throughput numbers are not, until Phase 3 replaces both with measured curves.**
+
+`blerLookup`'s *interface* is not a placeholder: it takes all five table keys — MCS, SINR,
+retransmission index, channel model, speed — even though the body reads three, precisely so
+that Phase 3 changes no caller. Adding a key later means regenerating every curve.
+
+## Superseded plan note
+`poolAllSlots` — the baseline Mode-2 resource pool, in which **every slot of the DFN
 period is a sidelink slot**. In Mode 2 there is no serving cell handing out a
 tdd-UL-DL-ConfigurationCommon, and `BUILD.md` defers S-SSB end-to-end sync explicitly, so
 nothing takes slots away and the pool is the whole period. Different pool configurations come

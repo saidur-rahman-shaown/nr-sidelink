@@ -9,7 +9,8 @@ root = fileparts(here);                    % repo root
 addpath(root);
 
 tests = { ...
-    @test.unit.harness.test_poolAllSlots};
+    @test.unit.harness.test_poolAllSlots, ...
+    @test.unit.harness.test_sls};
 
 nFail = 0;
 t0 = tic;

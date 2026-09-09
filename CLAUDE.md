@@ -38,8 +38,10 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
       +lib/      wrapped generics (OFDM, polar SCL, LDPC, LLR)
     +sap/        cross-layer SAP structs; the packet context and KPIs (built)
     +mac/        38.321 §5.22 §6.1.6 — Mode-2 TX path                (B8, built)
-    +rlc/ +pdcp/ +sdap/ +pc5s/ +app/   upper layers                  (planned, B9)
-    +harness/    link-level and system-level simulation              (planned, B10)
+    +rf/         RF stage — our boundary, no 3GPP SAP exists         (built, thin)
+    +app/        traffic generation                                  (periodic only)
+    +rlc/ +pdcp/ +sdap/ +pc5s/   upper layers                        (planned, B9)
+    +harness/    +sls/ runs end to end; +lls/ not built              (B10, partial)
     +vec/ +test/ golden vectors and verification
 
 ## Normative vs ours
@@ -79,3 +81,7 @@ example, or a module lacking a test file.
     matlab -batch "test.runPhyTests"     % +phy/
     matlab -batch "test.runMacTests"     % +mac/
     matlab -batch "test.runSapTests"     % +sap/
+    matlab -batch "test.runHarnessTests" % +harness/
+
+## Running a simulation
+    matlab -batch "k = harness.sls.run(50, 4000, 7); disp(k)"   % nUe, physical slots, seed

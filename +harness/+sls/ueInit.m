@@ -1,0 +1,56 @@
+function u = ueInit(ueId, scen)
+%ueInit Per-UE state for the system-level simulator.
+%Spec:   none -- an aggregation. Each field is created by the package that owns that state, so
+%        nothing here duplicates a state machine.
+%Inputs: ueId  integer, >=1
+%        scen  from +harness/+sls/scenarioInit
+%Outputs: u  scalar struct:
+%   .ueId .posXY .srcL2Id .dstL2Id  identity and geometry
+%   .lch     the MAC SAP, +sap/lchInit
+%   .grant   the selected-grant lifecycle, +mac/grantInit
+%   .harq    the HARQ entity, +mac/harqInit
+%   .db      the sensing database, +phy/+ts38214/sensingDbInit
+%   .nextPktId       integer -- monotonic packet counter
+%   .trafficOffset   integer -- this UE's CAM phase within the generation period
+%   .periodIdx       integer -- which reservation period of the current grant we are in, so
+%                    grantOnPeriodEnd fires exactly once per period
+%   .inFlight        struct array of contexts transmitted and not yet resolved
+%   .inFlightProc    1 x n integer -- the HARQ process each in-flight context is riding
+%   .pendingFb       struct array of PSFCH feedback due back to this UE
+%   .curTb .curCtx .curProc .curNdi  the transport block currently in the HARQ buffer, its
+%                    contexts, its Sidelink process and its NDI. Present and empty from the
+%                    start rather than added on first use: a struct array whose elements grow
+%                    different fields cannot be indexed, and MATLAB's error for it names the
+%                    assignment rather than the cause.
+%
+%TRAFFIC PHASE IS STAGGERED BY UE
+%--------------------------------
+%offset = mod(ueId-1, periodSlots) rather than 0. Every UE generating in the same slot
+%synchronises the whole scenario and manufactures a collision pattern that has nothing to do
+%with the resource selection under measurement -- the KPI would then be reporting the traffic
+%model.
+
+% Mode-2 caps transmitting Sidelink processes at 4 for multiple MAC PDUs (TS 38.321 clause
+% 5.22.1.3.1); harqInit's second argument carries that.
+isPeriodicMode2 = true;
+
+u = struct( ...
+    'ueId',          ueId, ...
+    'posXY',         scen.posXY(ueId, :), ...
+    'srcL2Id',       ueId, ...
+    'dstL2Id',       2^24 - 1, ...        % the broadcast destination in this scenario
+    'lch',           sap.lchInit(scen.traffic.lcid, scen.traffic.prio, 2^24 - 1, 0, 0, false), ...
+    'grant',         mac.grantInit(), ...
+    'harq',          mac.harqInit(4, isPeriodicMode2), ...
+    'db',            phy.ts38214.sensingDbInit(), ...
+    'nextPktId',     1, ...
+    'trafficOffset', mod(ueId - 1, scen.traffic.periodSlots), ...
+    'periodIdx',     0, ...
+    'inFlight',      repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0), ...
+    'inFlightProc',  zeros(1, 0), ...
+    'pendingFb',     repmat(struct('slotDue', 0, 'procIdx', 0, 'ack', false), 1, 0), ...
+    'curTb',         false(0, 1), ...
+    'curCtx',        repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0), ...
+    'curProc',       0, ...
+    'curNdi',        0);
+end
