@@ -9,7 +9,8 @@ root = fileparts(here);                    % repo root
 addpath(root);
 
 tests = { ...
-    @test.unit.sap.test_ctx};
+    @test.unit.sap.test_ctx, ...
+    @test.unit.sap.test_lch};
 
 nFail = 0;
 t0 = tic;

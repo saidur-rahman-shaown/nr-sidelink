@@ -1,6 +1,6 @@
 # SAP — the cross-layer vocabulary (non-normative)
 
-## Status: the packet context is built. The other five SAP structs are not.
+## Status: the packet context and the MAC SAP are built. Four SAP structs remain.
 
 `+sap/` holds the structs that cross layer boundaries, and nothing else: no algorithms, no
 state machines, no protocol logic. It depends on nothing and everything depends on it, which is
@@ -14,6 +14,11 @@ word "SAP" below.
 | `ctxTransmitted` | count a transmission; stamps `tx` on the first only |
 | `ctxFinish` | resolve a packet with a terminal outcome |
 | `outcomeCodes` | the five outcome constants |
+| `lchInit` | create the MAC SAP: logical channels with empty queues |
+| `lchEnqueue` | deliver one SDU onto its channel; stamps the `mac` crossing |
+| `lchDataAvailable` | queued bytes per channel — `+mac/slLcp`'s `dataAvailable` input |
+| `lchDequeue` | remove the SDUs an LCP allocation serves, oldest first |
+| `lchExpire` | discard SDUs whose PDB ran out, as losses |
 
 ## Why the context comes first, before any of the layers it crosses
 `INTEGRATION.md` puts this in Phase 0 rather than with the KPI work, because retrofitting
@@ -72,3 +77,38 @@ misuse: no boundary stamped twice, no packet resolved twice, no terminal code co
 `inFlight`, `tGenSlot` immutable, causality (no stamp before generation, same-slot allowed),
 every field range at its boundary, and a cross-check that a context built from `cfg.pqiTable`
 and `phy.rx.policy.remainingPdbSlots` agree on how much budget a packet has.
+
+## The MAC SAP — logical channels in
+`+mac/slLcp` takes six parallel `1 x nLch` row vectors, so `lchSet` stores exactly those and
+`lchDataAvailable` returns the seventh with no adaptation in between. `test_lch` composes the
+two directly, which is the real assertion that the SAP fits.
+
+**One queue with an index vector, not a queue per channel.** A per-channel queue means a cell
+array or a nested variable-length field, and this struct crosses into `+mac/`, which is
+normative and bans both. One flat context array plus `qLch` is the portable shape — two arrays
+that serialise and diff, with channel selection as a mask. Arrival order is preserved globally,
+so the queue is oldest-first within every channel too, without a sort.
+
+### Ordering within a slot: expire BEFORE LCP
+`lchExpire` runs first, so a grant is never sized around data that is already dead. Expiring
+after allocation wastes the grant on packets that will be dropped anyway, and that shows up as
+a throughput loss with no visible cause.
+
+### Two deliberate simplifications, both stated so they are not mistaken for results
+- **No segmentation.** `lchDequeue` serves whole SDUs only; an SDU larger than the remaining
+  allocation is left queued and the leftover bytes go unused. Real segmentation operates on RLC
+  SDU boundaries and is `+rlc/`'s job. Cost: throughput is **under**-reported whenever an
+  allocation ends with a partial SDU's worth of room, never over-reported, and latency is
+  undistorted since a leftover SDU is served by a later grant carrying its own timestamps.
+- **No strict head-of-line blocking.** If a channel's head SDU does not fit, a smaller SDU
+  behind it still can. Bounded — it only ever reorders around an SDU too large for *this*
+  grant — and the difference vanishes once `+rlc/` can segment. Asserted deliberately in the
+  test so a change to it is visible rather than silent.
+
+### `lchExpire` is why the latency numbers will be honest
+Without it a packet waits until something eventually transmits it and is then counted as a very
+slow success — inflating throughput and stretching the latency tail with samples that should
+not exist, both in the flattering direction, with nothing in the run to contradict it. It
+delegates the "is it spent" test to `phy.rx.policy.remainingPdbSlots` rather than recomputing
+the comparison, so the discard point and the selection-window feasibility point cannot drift
+apart. TS 38.321 clause 5.22 has no sidelink discard timer, so this decision is ours.
