@@ -1,6 +1,6 @@
 # SAP — the cross-layer vocabulary (non-normative)
 
-## Status: the packet context and the MAC SAP are built. Four SAP structs remain.
+## Status: the packet context, the MAC SAP and the PHY SAP are built. Three remain.
 
 `+sap/` holds the structs that cross layer boundaries, and nothing else: no algorithms, no
 state machines, no protocol logic. It depends on nothing and everything depends on it, which is
@@ -19,6 +19,9 @@ word "SAP" below.
 | `lchDataAvailable` | queued bytes per channel — `+mac/slLcp`'s `dataAvailable` input |
 | `lchDequeue` | remove the SDUs an LCP allocation serves, oldest first |
 | `lchExpire` | discard SDUs whose PDB ran out, as losses |
+| `castTypes` | the four SCI-2A cast-type code points |
+| `txReqInit` | a zeroed transmission request — the PHY SAP template |
+| `txReqValidate` | check one before it crosses the SAP |
 
 ## Why the context comes first, before any of the layers it crosses
 `INTEGRATION.md` puts this in Phase 0 rather than with the KPI work, because retrofitting
@@ -65,10 +68,45 @@ SL-SCH). Those two are genuine. The RF and channel boundaries in `INTEGRATION.md
 interfaces with the same discipline applied — there is no "RF SAP" in any specification. Do not
 go looking for one in TS 38.321.
 
+## The PHY SAP — what MAC hands to PHY
+Deliberately **not** waveform-shaped. `.waveform` is one optional field, empty in the normal
+case: the system-level PHY works from the descriptor alone and never builds samples, the
+link-level PHY fills it in. That is what lets both fidelities sit behind one interface, which
+`INTEGRATION.md` names as the most consequential decision in the tree.
+
+- **Full 24-bit Layer-2 IDs, not the SCI's truncated ones.** SCI 2-A carries an 8-bit Source ID
+  and a 16-bit Destination ID — the *LSBs*, with the MAC subheader carrying the complementary
+  MSBs, so neither layer alone identifies a peer. The SAP carries the complete identifiers and
+  the channel chain truncates, so there is one source of truth and the truncation happens where
+  the field widths are.
+- **Both slot numberings.** Selection happens in logical pool slots, transmission in wall-clock
+  time, and the conversion is not a scaling. Carrying both means no consumer holds the map.
+- **`ctxIds` is not optional.** A transport block no packet can be attributed to cannot close
+  any latency figure, so `txReqValidate` rejects an empty one rather than letting the TB
+  disappear from the KPI silently.
+
+### Cast type: the order is not the intuitive one
+`castTypes` is TS 38.212 Table 8.4.1.1-1. It is **not** broadcast/groupcast/unicast = 0/1/2:
+**unicast is 2**, and groupcast occupies both **1** (HARQ-ACK includes ACK or NACK) and **3**
+(NACK only, the distance-based scheme that pairs with SCI format 2-B). Writing the obvious
+enumeration puts unicast traffic on a groupcast code point — and both are legal values that
+decode without error, so the only symptom is peers answering with the wrong feedback scheme.
+The test round-trips all four through `phy.ts38212.sci2aPack`.
+
+### What `txReqValidate` deliberately does not check
+- That `slotLogical` and `slotPhysical` denote the same slot — that needs the pool map, which
+  this package does not hold. The harness checks it where the map lives.
+- That `.tb`'s length suits `.mcs` and `.LsubCH` — `phy.ts38214.tbsDetermine`'s arithmetic,
+  belonging to whoever built the TB.
+- **Broadcast with HARQ feedback enabled.** Conventionally it is disabled, but TS 38.214 clause
+  8.1 says only that the UE "shall set value of the 'Cast type indicator' field as indicated by
+  higher layers", and no clause read here forbids the combination. Asserting a convention as a
+  rule is the over-constraint `+mac/CLAUDE.md` records the test suite making with the first NDI
+  value. The scenario decides it, not the SAP.
+
 ## Not built
-The other five structs `INTEGRATION.md` freezes — the MAC SAP logical-channel queues, the PHY
-SAP transmission descriptor, the RF SAP, the channel SAP and the RX SAP. They land as the
-layers that need them do.
+The other three structs `INTEGRATION.md` freezes — the RF SAP, the channel SAP and the RX SAP. They
+land as the layers that need them do.
 
 ## Tests
 `+test/+unit/+sap/test_ctx.m`, run by `+test/runSapTests.m`. There is no correctness to assert
