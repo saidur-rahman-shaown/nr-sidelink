@@ -138,6 +138,58 @@ assert(pol.maxEscalations >= 1 && mod(pol.maxEscalations, 1) == 0, 'defaults: ma
 [modulation, Qm, ~] = phy.ts38214.mcsTableSelect(pol.mcs, '', 0);
 assert(Qm == 2 && strcmp(modulation, 'QPSK'), 'defaults: mcs %d must be QPSK for a no-CSI broadcast default, got %s', pol.mcs, modulation);
 
+%% ---- pdbLogicalSlots: wall clock -> pool opportunities -----------------
+% On the baseline pool the conversion is the identity, which is exactly why the unit confusion
+% it prevents is invisible there.
+mu = 1;
+[~, loAll, ~] = harness.poolAllSlots(mu);
+[remLog, nLog] = phy.rx.policy.pdbLogicalSlots(loAll, 1000, 200);
+assert(nLog == 1000, 'pdbLogicalSlots: on the identity pool the logical index equals the physical, got %d', nLog);
+assert(remLog == 200, 'pdbLogicalSlots: on the all-slots pool the budget is unchanged, got %d', remLog);
+
+% A pool holding every other slot: the same wall-clock budget buys HALF the opportunities.
+% This is the case that separates a correct conversion from passing physical slots straight
+% through -- the shortcut would claim 200 opportunities where only 100 exist.
+N     = 10240 * 2^mu;
+none  = false(1, N);
+alt   = repmat([true false], 1, 5);        % L_bitmap = 10, every other slot
+[~, loAlt, TpAlt] = phy.ts38214.poolSlotMap(mu, none, none, alt);
+assert(TpAlt == N / 2, 'test setup: the alternating bitmap must halve the pool, got %d', TpAlt);
+[remHalf, nHalf] = phy.rx.policy.pdbLogicalSlots(loAlt, 1000, 200);
+assert(nHalf == 500, 'pdbLogicalSlots: physical slot 1000 is logical slot 500 in a half pool, got %d', nHalf);
+assert(remHalf == 100, 'pdbLogicalSlots: a 200-physical-slot budget buys 100 opportunities in a half pool, got %d', remHalf);
+% ...and the naive pass-through would have been 200, i.e. double. Pin the discrepancy.
+assert(remHalf * 2 == 200, 'the half pool must halve the budget, or this test proves nothing');
+
+% Strictly after `now`: the current slot is never one of the remaining opportunities.
+[remZero, ~] = phy.rx.policy.pdbLogicalSlots(loAll, 1000, 0);
+assert(remZero == 0, 'pdbLogicalSlots: a spent budget offers no further opportunity, got %d', remZero);
+[remOne, ~] = phy.rx.policy.pdbLogicalSlots(loAll, 1000, 1);
+assert(remOne == 1, 'pdbLogicalSlots: one physical slot of budget is exactly one opportunity on the identity pool, got %d', remOne);
+
+% n must be a pool slot -- clause 8.1.4's n is defined only there.
+mustError(@() phy.rx.policy.pdbLogicalSlots(loAlt, 1001, 200), 'policy:pdbLogicalSlots:notPoolSlot', 'a trigger slot outside the pool');
+mustError(@() phy.rx.policy.pdbLogicalSlots(loAll, N, 200), 'policy:pdbLogicalSlots:nowOutOfRange', 'a slot past the DFN period');
+mustError(@() phy.rx.policy.pdbLogicalSlots(loAll, -1, 200), 'policy:pdbLogicalSlots:badNow', 'a negative slot');
+% The clamp at the end of the period, rather than a wrap.
+[remEnd, ~] = phy.rx.policy.pdbLogicalSlots(loAll, N - 5, 200);
+assert(remEnd == 4, 'pdbLogicalSlots: the budget must clamp at the end of the DFN period, got %d', remEnd);
+
+%% ---- the full chain, in the order callers must use it ------------------
+% PQI 55: 100 ms PDB. mu=1 -> 200 physical slots -> 100 opportunities in the half pool.
+t   = cfg.pqiTable();
+row = t([t.PQI] == 55);
+[remPhys, expired] = phy.rx.policy.remainingPdbSlots(row.PDB_ms, 900, 1000, mu);
+assert(remPhys == 100 && ~expired, 'chain: 200-slot budget with 100 elapsed leaves 100 physical slots, got %d', remPhys);
+[remLogical, nTrig] = phy.rx.policy.pdbLogicalSlots(loAlt, 1000, remPhys);
+assert(remLogical == 50, 'chain: 100 physical slots is 50 opportunities in a half pool, got %d', remLogical);
+[reqChain, feasChain] = phy.rx.policy.selectionRequest(nTrig, mu, remLogical, row.priority, 5, pol);
+assert(feasChain, 'chain: 50 opportunities comfortably exceeds T_proc,1 = 5');
+assert(reqChain.T2 == 50 && reqChain.n == nTrig, 'chain: T2 must be the logical budget and n the logical trigger slot');
+% candidateSet accepts it, and every candidate lies inside the window.
+[cy, ~, ~, Mt] = phy.ts38214.candidateSet(reqChain, 10, 100, mu, db, repmat(-110, 1, 64), 0.2, [100], 20, 100000, pol.maxEscalations);
+assert(Mt > 0 && all(cy >= nTrig + reqChain.T1) && all(cy <= nTrig + reqChain.T2), 'chain: candidates must lie in the logical window');
+
 fprintf('test_policy: all assertions passed.\n');
 end
 

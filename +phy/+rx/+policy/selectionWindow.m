@@ -6,10 +6,15 @@ function [T1, T2, feasible] = selectionWindow(mu, remainingPdb)
 %        UE implementation by the same clause, so it is made here and validated there:
 %        phy.ts38214.candidateSet re-derives both bounds and rejects a violation.
 %Inputs: mu            integer, 0..3 -- mu_SL, the SCS configuration of the SL BWP
-%        remainingPdb  integer, >=0, slots -- remaining packet delay budget, from
-%                      phy.rx.policy.remainingPdbSlots
-%Outputs: T1        integer, 0..T_proc,1^SL, slots -- selection-window start offset
-%         T2        integer, >=0, slots -- selection-window end offset
+%        remainingPdb  integer, >=0 -- remaining packet delay budget, in **LOGICAL POOL
+%                      SLOTS**, from phy.rx.policy.pdbLogicalSlots. NOT the physical-slot
+%                      figure phy.rx.policy.remainingPdbSlots returns: T2 is an offset in
+%                      clause 8.1.4's pool-slot numbering, and a delay budget is wall clock.
+%                      The two are equal only when the pool holds every slot, which the
+%                      baseline (harness.poolAllSlots) does -- so mixing them up is invisible
+%                      there and over-states the budget on any other pool.
+%Outputs: T1        integer, 0..T_proc,1^SL, logical pool slots -- window start offset
+%         T2        integer, >=0, logical pool slots -- window end offset
 %         feasible  logical -- false when no legal non-empty window exists at all, i.e. the
 %                   budget is already shorter than the processing time. The caller must
 %                   DISCARD on this and must not call candidateSet, which would raise

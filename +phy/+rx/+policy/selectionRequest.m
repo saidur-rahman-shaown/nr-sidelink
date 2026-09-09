@@ -8,7 +8,13 @@ function [req, feasible] = selectionRequest(n, mu, remainingPdb, prioTx, Cresel,
 %                      +phy/+ts38214/ is the logical side of the mapping and never converts;
 %                      neither does this function.
 %        mu            integer, 0..3 -- mu_SL
-%        remainingPdb  integer, >=0, slots -- from phy.rx.policy.remainingPdbSlots
+%        remainingPdb  integer, >=0 -- remaining packet delay budget in **LOGICAL POOL SLOTS**.
+%                      The three-step chain that produces it, in order:
+%                        [remPhys, expired] = phy.rx.policy.remainingPdbSlots(pdbMs, tGen, now, mu)
+%                        [remLogical, n]    = phy.rx.policy.pdbLogicalSlots(logicalOfPhys, now, remPhys)
+%                        [req, feasible]    = phy.rx.policy.selectionRequest(n, mu, remLogical, ...)
+%                      Skipping the middle step is correct only on a pool that holds every
+%                      slot. See phy.rx.policy.pdbLogicalSlots.
 %        prioTx        integer, 1..8 -- prio_TX, the L1 priority of the traffic that triggered
 %                      selection. 1 is the HIGHEST (see +mac/CLAUDE.md).
 %        Cresel        integer, >=1 -- C_resel from +mac/cresel. Must be 1 when p.prsvpTxMs

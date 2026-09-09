@@ -11,7 +11,8 @@ into `phy.ts38214.candidateSet` and letting *it* re-derive the bounds.
 | Module | Decision | This cut |
 |---|---|---|
 | `defaults` | L_subCH, MCS, P_rsvp_TX, blind retx count, escalation guard | 2 sub-channels, MCS 7 (QPSK), 100 ms, 1 retx, 10 |
-| `remainingPdbSlots` | how much budget is left, and when to discard | floor(PDB·2^µ) − elapsed, clamped at 0 |
+| `remainingPdbSlots` | how much budget is left, and when to discard | floor(PDB·2^µ) − elapsed, clamped at 0, in **physical** slots |
+| `pdbLogicalSlots` | that budget as pool opportunities | exact count, not a duty-cycle scaling |
 | `selectionWindow` | T1, T2 | **T1 = T_proc,1^SL, T2 = the remaining PDB** |
 | `selectionRequest` | assembles `candidateSet`'s `req` | glue; computes nothing normative |
 | `resourcePick` | which resource out of S_A | uniform |
@@ -54,6 +55,28 @@ An optimising policy shrinks T2 toward T2min while CBR (`+phy/+ts38215/`) is low
 toward the PDB as contention rises. That policy replaces `selectionWindow` and nothing else —
 no caller, and no normative module, changes.
 
+## Two units, and they are equal only in the baseline
+A delay budget is **wall clock**; clause 8.1.4's T1, T2 and n are **logical pool slot** offsets.
+`remainingPdbSlots` produces the first, `candidateSet` consumes the second, and
+`pdbLogicalSlots` is the conversion between them. The chain, in order:
+
+    [remPhys, expired] = remainingPdbSlots(pdbMs, tGenSlot, nowPhys, mu)   % physical
+    [remLogical, n]    = pdbLogicalSlots(logicalOfPhys, nowPhys, remPhys)  % logical
+    [req, feasible]    = selectionRequest(n, mu, remLogical, ...)
+
+On the baseline pool (`harness.poolAllSlots`, every slot a sidelink slot) the middle step is
+the identity, so skipping it is correct **there and nowhere else**. On a pool holding half the
+slots, a 200-physical-slot budget buys 100 opportunities, and passing the physical figure
+straight through claims twice the time the packet actually has — over-stating T2, under-counting
+deadline misses. The first version of this package did exactly that; the half-pool case in
+`test_policy` is what discriminates the fix.
+
+The conversion counts the pool slots in the window rather than scaling by the pool's duty cycle.
+Scaling is right on average and wrong in every particular, because pool slots are not evenly
+spaced — an S-SSB burst or TDD pattern clusters the gaps, and near a cluster the average
+over-counts the opportunities actually reachable, which is the direction that makes a packet
+look like it had time it did not have.
+
 ## Known traps
 - **T2 = PDB and a uniform pick together are what produce the latency, not the channel.** On an
   empty pool this policy still reports tens of ms. Do not go looking for a bug in `+phy/` when
@@ -69,6 +92,9 @@ no caller, and no normative module, changes.
   fully-formed `req` for the discard log; calling `candidateSet` anyway raises
   `ts38214:candidateSet:emptyWindow`. Never "fix" this by clamping T1 down — that keeps the
   packet alive by asking for a transmission the UE cannot produce.
+- **Physical and logical slots are not interchangeable, and the baseline hides it.** See the
+  section above. Any new policy function that takes a slot must say which numbering in its
+  header, every time.
 - **Randomness is an input here too.** `resourcePick` takes the draw, following `+mac/`'s rule,
   so a grant lifecycle replays exactly from its seed. No `rand()` in this package even though
   the non-normative rules would allow it.

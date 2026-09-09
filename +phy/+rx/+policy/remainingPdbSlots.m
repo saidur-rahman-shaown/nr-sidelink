@@ -10,9 +10,11 @@ function [remaining, expired] = remainingPdbSlots(pdbMs, genSlot, currentSlot, m
 %                     from creation, not from arrival at MAC.
 %        currentSlot  integer, >= genSlot -- the slot being evaluated
 %        mu           integer, 0..3 -- mu_SL, the SCS configuration of the SL BWP
-%Outputs: remaining  integer, >=0, slots -- budget left, clamped at 0. Feeds
-%                    phy.ts38214.candidateSet's req.remainingPdbSlots and, through
-%                    phy.rx.policy.selectionWindow, its T2.
+%Outputs: remaining  integer, >=0 -- budget left in **PHYSICAL** slots, clamped at 0. Physical
+%                    because a delay budget is wall clock. It must be converted to logical
+%                    pool slots by phy.rx.policy.pdbLogicalSlots before it can bound T2, which
+%                    is an offset in clause 8.1.4's pool-slot numbering. The two coincide only
+%                    on a pool that holds every slot.
 %         expired    logical -- true when the budget is exhausted. The caller must DISCARD the
 %                    SDU on this, not transmit it late.
 %
