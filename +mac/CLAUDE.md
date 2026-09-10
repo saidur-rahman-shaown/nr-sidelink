@@ -34,6 +34,7 @@ what the test now asserts.
 | `creselCounterRange` | 5.22.1.1 | the `SL_RESOURCE_RESELECTION_COUNTER` draw range by reservation period |
 | `cresel` | 38.214 §8.1.4 | `C_resel = 10 × counter`, or 1 when no counter is configured |
 | `keepDecision` | 5.22.1.1 / 5.22.1.2 | the `sl-ProbResourceKeep` branch at counter expiry |
+| `grantOnKeep` | 5.22.1.1 | re-arm a kept grant: re-draw the counter, spend the keep draw |
 | `grantInit` / `grantSelect` / `grantOnTransmission` / `grantOnPeriodEnd` / `grantClear` | 5.22.1.1 | selected grant → periodic reservation → decrement → keep or reselect |
 | `muxSlSch` | 6.1.6, 6.2.4, 6.1.3.35 | SL-SCH MAC PDU, subheaders, LCID, source and destination L2 IDs |
 | `slLcpBucket` / `slLcp` | 5.22.1.4.1 | per-destination, per-logical-channel prioritisation |
@@ -145,6 +146,17 @@ transmissions sit closer together, so the packet completes sooner and the latenc
   initial transmission plus two retransmission opportunities carries one MAC PDU per period and
   costs **one** count, not three. Decrementing per transmission shortens every grant's life by
   the retransmission multiple while still drawing a plausible-looking SPS pattern.
+- **The keep branch RE-DRAWS the counter, and skipping that makes the grant immortal.** Clause
+  5.22.1.1's keep branch is three bullets, and the middle one is the easy one to lose because
+  the first ("clear the selected sidelink grant") and the third ("reuse the previously selected
+  sidelink grant") read as though they cancel and the whole branch reads as a no-op. It is not:
+  between them, `SL_RESOURCE_RESELECTION_COUNTER` is re-selected from the same interval as an
+  initial selection. Without it the counter stays at 0 and the *same stored draw* is
+  re-evaluated every period, so a grant that kept once keeps forever and `sl-ProbResourceKeep`
+  becomes a single coin flip deciding a grant's whole lifetime rather than a per-period one.
+  `grantOnKeep` is that bullet. Nothing errors, and the reservation pattern still looks
+  plausible — the symptom is only that almost every counter sits at 0 late in a long run
+  (18 of 20 before the fix, 3 of 20 after).
 - **`counter == 0` is not by itself a reselection trigger.** Clause 5.22.1.1's keep branch and
   clause 5.22.1.2's reselect branch partition the `counter == 0` case by the `sl-ProbResourceKeep`
   draw. Treating zero as an unconditional trigger makes `sl-ProbResourceKeep` a no-op, and

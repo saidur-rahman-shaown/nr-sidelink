@@ -211,6 +211,40 @@ this is that gap. Clearing everything is conservative — it never keeps a resou
 to drop — but it discards good resources with the bad, costing more reselections than a
 conformant UE would perform.
 
+### Five bugs that only a longer, harder run exposed
+All five passed every short-run test and every KPI sanity check. Recorded because each has a
+quiet signature rather than an error.
+
+1. **The counter was never re-drawn on the keep branch.** See `+mac/CLAUDE.md`. Symptom: 18 of
+   20 counters sitting at 0 after 6 s; reselection silently stops after the first keep.
+   `mac.grantOnKeep` is the missing bullet. It runs **before** the data-availability return in
+   `macPhase`, because a periodic grant's counter is maintained whether or not there is
+   anything to send — gating it on pending data leaves the counter parked through idle periods.
+2. **The reservation-period reference was read off `grant.txOppSlot(1)`.** Clause 5.22.1.2a's
+   replacement re-sorts the grant and can put a new resource *earlier* than the old anchor, so
+   the reference moved and the period index jumped with it — firing `grantOnPeriodEnd` the
+   wrong number of times and decrementing the counter at the wrong rate. Now `ue.periodRefSlot`,
+   fixed at selection.
+3. **Flagged resource indices went stale mid-loop.** Each `grantReplaceResource` re-sorts, so an
+   index captured before the first replacement points at a different resource after it: the
+   second replacement swapped out a good resource and left the flagged one in place. Resources
+   are now addressed by **slot**, re-found after every replacement.
+4. **The HARQ process was keyed off `nextPktId`.** That is not a cycle — `nextPktId` advances on
+   *generation* — so a TB built while an earlier one was still in flight could land on the same
+   process and overwrite its buffer, losing the packets riding it. Now a round-robin that skips
+   processes with unresolved contexts, and declines to transmit when all are occupied.
+5. **`harqNewTransmission` was called with `feedbackEnabled = false` unconditionally**, so in
+   unicast the HARQ entity believed every process was feedback-disabled while the SCI said
+   otherwise. Now follows the cast type: 4 of 4 processes enabled in unicast, 0 of 4 in
+   broadcast.
+
+Plus one that did raise, honestly: **`maxEscalations` was a round 10.** Clause 8.1.4 step 7
+climbs 3 dB per round until S_A reaches `sl-TxPercentage` of M_total, so the bound has to clear
+the strongest signal any UE can sense. A 20 m neighbour at P_CMAX sits ~50 dB above a −110 dBm
+threshold, and 10 rounds is 30 dB. `scenarioInit` now derives it from the deployment's closest
+separation (18 for this scenario). The bound raising was it working correctly and reporting
+that it had been set too low.
+
 ### The two reliability figures, which are different numbers
 - **`kpi.prr` is packet-level:** a packet counts as delivered if *any* receiver decoded it.
   This is what closes a latency figure — a packet has one latency, not one per listener — and

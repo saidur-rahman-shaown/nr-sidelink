@@ -158,6 +158,28 @@ if onePdu > scen.maxTbsBytes
     error('sls:scenarioInit:sduTooLarge', 'scenarioInit: a %d-byte MAC PDU (a %d-byte SDU plus overhead) does not fit even L_subCH = %d (%d bytes) at MCS %d', onePdu, scen.traffic.sizeBytes, scen.numSubchannel, scen.maxTbsBytes, scen.policy.mcs);
 end
 
+scen.nUe      = nUe;
+scen.spacingM = 20;
+scen.posXY    = [(0:nUe - 1)' * scen.spacingM, zeros(nUe, 1)];
+
+% ---- the escalation bound, DERIVED rather than guessed ---------------------
+% Clause 8.1.4 step 7 raises every RSRP threshold by 3 dB and repeats until S_A reaches
+% sl-TxPercentage of M_total. The loop provably terminates -- once the thresholds exceed every
+% sensed RSRP, step 6 excludes nothing -- so the only question is how many rounds that takes,
+% and the answer is set by the scenario's geometry, not by a round number.
+%
+% The strongest signal any UE can sense is one at the closest separation in the deployment. The
+% threshold must climb from the lowest configured value past that, in 3 dB steps. Leaving
+% phy.rx.policy.defaults' generic bound of 10 in place gives only 30 dB of headroom, while a
+% 20 m neighbour at P_CMAX sits about 50 dB above a -110 dBm threshold -- so candidateSet
+% raises ts38214:candidateSet:escalationLimit partway through a long run, which is the bound
+% doing its job and reporting that it was set too low.
+escalationStepDb = 3;                    % clause 8.1.4 step 7
+closestPl = harness.chanmodel.pathlossDb(scen.spacingM, scen.radio.fcHz, ...
+    scen.radio.plExponent, scen.radio.plRefDistM);
+strongestRsrpDbm = scen.pCmaxDbm - closestPl;
+scen.policy.maxEscalations = ceil((strongestRsrpDbm - min(scen.pool.thresholdListDbm)) / escalationStepDb) + 1;
+
 % ---- geometry: a line of UEs, stationary -----------------------------------
 % Per-UE sl-Priority, uniform by default. A vector rather than a scalar because pre-emption's
 % comparison is STRICT (+mac/CLAUDE.md: only a numerically smaller sl-Priority pre-empts, or
@@ -166,10 +188,6 @@ end
 % scalar would make that structural impossibility look like a wiring bug, and would make it
 % impossible to tell the two apart.
 scen.prioByUe = repmat(scen.traffic.prio, 1, nUe);
-
-scen.nUe   = nUe;
-scen.spacingM = 20;
-scen.posXY = [(0:nUe - 1)' * scen.spacingM, zeros(nUe, 1)];
 
 % ---- the one source of randomness -----------------------------------------
 % Every module below takes its draws as inputs; this is where they come from, and a seed

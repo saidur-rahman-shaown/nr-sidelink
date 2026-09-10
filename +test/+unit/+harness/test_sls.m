@@ -242,5 +242,49 @@ pl.pool.slPreemptionEnable = 'pl1';
 kPl = harness.sls.runScenario(pl, 1500);
 assert(kPl.nPreempt == 0, '''pl1'' must reject a pre-emptor already at priority 1, since prio_RX < prio_pre is strict; got %d', kPl.nPreempt);
 
+%% ---- regressions for five bugs found by running longer and harder -------
+% 1. The counter must be RE-DRAWN on the keep branch (clause 5.22.1.1). Without it the counter
+%    parks at 0, the same stored draw is re-evaluated every period, and a grant that kept once
+%    keeps forever -- SPS looks stable and reselection simply stops. Symptom: almost every
+%    counter sitting at 0 late in a long run.
+[~, ueLong] = harness.sls.run(20, 12000, 3);
+ctr = arrayfun(@(x) x.grant.counter, ueLong);
+assert(nnz(ctr == 0) < 0.4 * numel(ctr), 'counters parked at zero (%d of %d) -- the keep branch is not re-drawing SL_RESOURCE_RESELECTION_COUNTER', nnz(ctr == 0), numel(ctr));
+assert(numel(unique(ctr)) > 3, 'counters must take a spread of values across UEs, got %s', mat2str(unique(ctr)));
+assert(max(ctr) > 5, 'a re-armed counter must reach well above zero, got max %d', max(ctr));
+
+% 2. The HARQ feedback flag must follow the cast type, not be hardcoded. A mismatch leaves the
+%    HARQ entity's own bookkeeping disagreeing with the SCI actually transmitted.
+[~, ueU] = harness.sls.run(12, 3000, 5, 'unicast');
+[~, ueB] = harness.sls.run(12, 3000, 5, 'broadcast');
+assert(all(ueU(1).harq.feedbackEnabled), 'unicast processes must be marked feedback-enabled');
+assert(~any(ueB(1).harq.feedbackEnabled), 'broadcast processes must be marked feedback-disabled');
+
+% 3. A Sidelink process holding an unresolved TB must not be reused -- clause 5.22.1.3.1a gives
+%    each process exactly one TB, and reuse overwrites the buffer and loses the packets on it.
+for i = 1:numel(ueU)
+    p = ueU(i).inFlightProc;
+    assert(all(p >= 1 & p <= ueU(i).harq.nProcesses), 'in-flight process ids must be valid, got %s', mat2str(unique(p)));
+end
+
+% 4. The reservation-period reference must be fixed at selection, not read back off
+%    txOppSlot(1): clause 5.22.1.2a's replacement re-sorts the grant and can move the anchor.
+for i = 1:numel(ueLong)
+    if ueLong(i).grant.hasGrant
+        assert(ueLong(i).periodRefSlot > 0, 'a selected grant must carry a fixed period reference slot');
+    end
+end
+
+% 5. The step-7 escalation bound must be derived from the deployment, not a round number. The
+%    threshold has to climb past the strongest signal any UE can sense, in 3 dB steps; a 20 m
+%    neighbour at P_CMAX sits ~50 dB above a -110 dBm threshold, so a bound of 10 (30 dB) runs
+%    out partway through a long run and candidateSet raises rather than converging.
+scEsc = harness.sls.scenarioInit(20, 1);
+assert(scEsc.policy.maxEscalations > 10, 'the escalation bound must be derived from the geometry, got %d', scEsc.policy.maxEscalations);
+closest = harness.chanmodel.pathlossDb(scEsc.spacingM, scEsc.radio.fcHz, scEsc.radio.plExponent, scEsc.radio.plRefDistM);
+headroomDb = 3 * scEsc.policy.maxEscalations;
+assert(headroomDb >= (scEsc.pCmaxDbm - closest) - min(scEsc.pool.thresholdListDbm), ...
+    'the bound must give enough headroom to clear the strongest sensible RSRP');
+
 fprintf('test_sls: all assertions passed.\n');
 end

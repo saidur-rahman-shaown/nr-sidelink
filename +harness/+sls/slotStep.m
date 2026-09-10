@@ -318,10 +318,19 @@ end
 % the whole grant -- which this loop did first -- is conservative but over-reacts: it discards
 % good resources with the bad, costs more reselections than a conformant UE performs, and
 % inflates the access delay every one of those reselections adds.
-dueIdx  = find(due);
-flagged = dueIdx([needsReselect | preempted]);
-for r = flagged
-    kept = u.grant.txOppSlot(setdiff(1:nOpp, r)) + u.periodIdx * periodLogical;
+% Address the flagged resources by SLOT, not by index. Every grantReplaceResource call
+% re-sorts the grant, so an index captured before the first replacement points at a DIFFERENT
+% resource after it -- and the second replacement then swaps out a perfectly good resource
+% while leaving the flagged one in place.
+dueIdx       = find(due);
+flaggedSlots = resSlot(dueIdx([needsReselect | preempted]));
+for fs = flaggedSlots
+    r = find(u.grant.txOppSlot + u.periodIdx * periodLogical == fs, 1);
+    if isempty(r)
+        continue;                    % already replaced by an earlier iteration of this loop
+    end
+    nOppNow = numel(u.grant.txOppSlot);
+    kept = u.grant.txOppSlot(setdiff(1:nOppNow, r)) + u.periodIdx * periodLogical;
     minGap = phy.rx.policy.minResourceGapSlots(nLog, scen.slPsfchPeriod, ...
         scen.minTimeGapPsfch, scen.policy.psfchProcSlots);
     [newSlot, newSubch, found] = phy.rx.policy.resourceReplace(candY, candX, survivor, ...
@@ -496,8 +505,31 @@ if opp == 1
     sduLen = [served.sizeBytes];
     pdu = mac.muxSlSch(u.srcL2Id, u.dstL2Id, uint8(zeros(1, sum(sduLen))), sduLen, ...
         repmat(scen.traffic.lcid, 1, numel(served)), false, 0, 0, tbsBytes);
-    proc = mod(u.nextPktId, u.harq.nProcesses) + 1;
-    [u.harq, ndi, rv] = mac.harqNewTransmission(u.harq, proc, [0 2 3 1], proc - 1, false);
+    % A Sidelink process whose buffer still holds an unresolved TB cannot take a new one --
+    % clause 5.22.1.3.1a gives each process exactly one TB. Keying the process off nextPktId,
+    % as this loop did, is not a cycle at all: nextPktId advances on GENERATION, so a TB built
+    % while an earlier one is still in flight can land on the same process, and the second
+    % overwrites the first's buffer and loses the packets riding it.
+    busy = false(1, u.harq.nProcesses);
+    if ~isempty(u.inFlightProc)
+        busy(u.inFlightProc) = true;
+    end
+    proc = 0;
+    for c = 1:u.harq.nProcesses
+        cand = mod(u.nextProc + c - 1, u.harq.nProcesses) + 1;
+        if ~busy(cand)
+            proc = cand;
+            break;
+        end
+    end
+    if proc == 0
+        return;                      % every Sidelink process occupied: nothing to transmit on
+    end
+    u.nextProc = proc;
+    % The feedback flag must follow the cast type. Hardcoding false told the HARQ entity every
+    % process was feedback-disabled even in unicast, so harqOnFeedback's own bookkeeping
+    % disagreed with the SCI actually sent.
+    [u.harq, ndi, rv] = mac.harqNewTransmission(u.harq, proc, [0 2 3 1], proc - 1, scen.isUnicast);
     ndi = double(ndi);          % the HARQ entity keeps NDI as a logical toggle; the SCI field
                                 % is a bit, and +sap/txReqValidate checks field widths
     % muxSlSch returns a double 0/1 column; the PHY SAP requires logical, so the conversion
@@ -610,7 +642,11 @@ function [u, scen] = periodPhase(u, scen, nLog, periodLogical)
 if ~u.grant.hasGrant
     return;
 end
-idx = floor((nLog - u.grant.txOppSlot(1)) / periodLogical);
+% Measured from the FIXED reference captured at selection, not from txOppSlot(1). Clause
+% 5.22.1.2a's replacement can land earlier than the old anchor, and grantReplaceResource
+% re-sorts, so reading the reference back off the grant makes the period index jump -- firing
+% grantOnPeriodEnd the wrong number of times and decrementing the counter at the wrong rate.
+idx = floor((nLog - u.periodRefSlot) / periodLogical);
 for k = 1:(idx - u.periodIdx)
     [u.grant, ~] = mac.grantOnPeriodEnd(u.grant, rand(scen.stream));
 end
@@ -622,6 +658,22 @@ end
 % =========================================================================
 function [u, scen] = macPhase(u, scen, nLog, periodLogical)  %#ok<INUSD>
 %macPhase Clause 5.22.1.2's reselection check, and the (re)selection that follows it.
+% Clause 5.22.1.1's keep branch is not a no-op: between "clear the selected sidelink grant"
+% and "reuse the previously selected sidelink grant" it RE-DRAWS the counter. Without that the
+% counter stays at 0 and the SAME stored draw is re-evaluated every period, so a grant that
+% kept once keeps forever and sl-ProbResourceKeep becomes a single coin flip deciding the
+% grant's whole lifetime rather than a per-period one. Nothing errors and the reservation
+% pattern still looks plausible.
+%
+% It runs BEFORE the data-availability return below, because a periodic grant's counter is
+% maintained whether or not there is anything to send right now -- gating it on pending data
+% leaves the counter parked at zero through every idle period.
+if u.grant.hasGrant && u.grant.isPeriodic && u.grant.counter == 0 && ...
+        mac.keepDecision(u.grant.keepDraw, scen.pool.slProbResourceKeep)
+    [lo, hi] = mac.creselCounterRange(scen.policy.prsvpTxMs);
+    u.grant  = mac.grantOnKeep(u.grant, lo + floor(rand(scen.stream) * (hi - lo + 1)));
+end
+
 avail = sap.lchDataAvailable(u.lch);
 if ~any(avail > 0) && u.grant.hasGrant
     return;                                     % nothing to reselect for
@@ -684,6 +736,7 @@ minGap = phy.rx.policy.minResourceGapSlots(nLog, scen.slPsfchPeriod, scen.minTim
 [slots, subch] = phy.rx.policy.resourcePickChained(candY, candX, survivor, draws, ...
     scen.maxNumPerReserve, minGap);
 
-u.grant     = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, true, counter);
-u.periodIdx = 0;
+u.grant         = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, true, counter);
+u.periodIdx     = 0;
+u.periodRefSlot = slots(1);
 end
