@@ -54,12 +54,11 @@ scen.radio = struct( ...
 scen.pCmaxDbm     = 23;     % P_CMAX; slPowerControl is a max-power-always policy for now
 scen.channelModel = 'awgn';
 scen.speedKmh     = 0;
-% PSCCH carries SCI-1A at a fixed, very low effective code rate while PSSCH runs at the
-% signalled MCS, which is why control decodes further out than data. It is NOT a bandwidth
-% advantage -- see +harness/+chanmodel/slotSinr: signal and noise scale together with the band
-% and the SNR is identical. Modelled as the most robust point of the MCS table, since that is
-% the lowest code rate the placeholder BLER curve family offers.
-scen.pscchEffectiveMcs = 0;
+% PSCCH decodes further out than PSSCH because its code rate is far lower and does not move
+% with the data's -- NOT because it is narrower: +harness/+chanmodel/slotSinr shows signal and
+% noise scale together with the band, leaving the SNR identical. There is no
+% pscchEffectiveMcs knob any more: the control curve is measured directly by +harness/+lls/ and
+% read through harness.phyabs.pscchBler.
 
 % ---- selection policy ------------------------------------------------------
 scen.policy = phy.rx.policy.defaults();

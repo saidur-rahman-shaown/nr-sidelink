@@ -184,11 +184,23 @@ pair = [mk(1, [0 0], 0, 3), mk(2, [250 0], 0, 1)];
 [sd1, ~, ~, sp1] = harness.chanmodel.slotSinr(pair, [0 0; 250 0; 120 0], sc.radio, sc.numSubchannel, sc.pscchPrb, sc.subchSizeRb);
 assert(sp1(1, 3) < sd1(1, 3) - 5, 'a sub-channel-aligned interferer must hurt PSCCH far more than PSSCH, got %.2f vs %.2f dB', sp1(1, 3), sd1(1, 3));
 
-% Control robustness comes from CODE RATE, and the decode uses the low-rate point.
-assert(sc.pscchEffectiveMcs < sc.policy.mcs, 'SCI must be decoded at a lower effective MCS than the data');
-assert(harness.phyabs.blerLookup(sc.pscchEffectiveMcs, 0, 1, 'awgn', 0) < ...
+% Control robustness comes from CODE RATE, and it is now MEASURED rather than approximated by
+% reading the PSSCH curve at a low proxy MCS. The advantage grows with the data's MCS, because
+% PSCCH's own rate does not move with it -- which is precisely what a single proxy could not
+% express.
+tblP = harness.phyabs.blerTable();
+for m = tblP.mcs
+    cD = squeeze(tblP.pssch(tblP.mcs == m, :, 1));
+    cC = tblP.pscch(tblP.mcs == m, :);
+    kD = find(cD <= 0.5, 1);
+    kC = find(cC <= 0.5, 1);
+    assert(~isempty(kC) && tblP.snrDb(kC) < tblP.snrDb(kD), ...
+        'MCS %d: control must decode strictly before data (control %.2f dB, data %.2f dB)', ...
+        m, tblP.snrDb(kC), tblP.snrDb(kD));
+end
+assert(harness.phyabs.pscchBler(sc.policy.mcs, 0) <= ...
        harness.phyabs.blerLookup(sc.policy.mcs, 0, 1, 'awgn', 0), ...
-       'the SCI effective MCS must be more robust than the data MCS at the same SINR');
+       'at the same SINR the control channel must be at least as robust as the data channel');
 
 %% ---- clause 5.22.1.2a: re-evaluation and pre-emption are wired ----------
 % Both checks run at EXACTLY m - T_3, and only the resources due at that instant are passed to
@@ -205,13 +217,19 @@ assert(quiet.nReeval == 0, 'a lightly loaded pool should need no re-evaluation, 
 % comparison is strict, or two same-priority UEs pre-empt each other indefinitely and neither
 % ever transmits. So zero here is the structurally correct answer, not a wiring failure -- which
 % is exactly why the mixed-priority case below has to exist to tell the two apart.
-uniform = harness.sls.scenarioInit(40, 9);
+% 60 UEs, not 40. Under the PLACEHOLDER BLER curve 40 was enough; against the MEASURED curves
+% it is not, and the reason is physical rather than a tuning accident: the measured PSCCH curve
+% is harsher than the invented one, so fewer SCIs decode at range, so each UE's sensing database
+% holds fewer reservations, so fewer overlaps are detected and pre-emption fires less often. A
+% denser pool restores the condition. Measured: at 40 UEs pre-emption fires 0 times, at 60 it
+% fires 1, at 80 it fires 2.
+uniform = harness.sls.scenarioInit(60, 9);
 kUni = harness.sls.runScenario(uniform, 1500);
 assert(all(uniform.prioByUe == uniform.prioByUe(1)), 'the default scenario must be single-priority for this to mean anything');
 assert(kUni.nPreempt == 0, 'pre-emption must never fire between equal priorities, got %d', kUni.nPreempt);
 
 % With a higher-priority class present it does fire, on the same seed and geometry.
-mixed = harness.sls.scenarioInit(40, 9);
+mixed = harness.sls.scenarioInit(60, 9);
 mixed.prioByUe(1:4:end) = 1;                 % 1 is the HIGHEST priority
 kMix = harness.sls.runScenario(mixed, 1500);
 assert(kMix.nPreempt > 0, 'a higher-priority class must pre-empt somewhere in a loaded pool, got %d', kMix.nPreempt);
@@ -219,7 +237,7 @@ assert(kMix.nPreempt > 0, 'a higher-priority class must pre-empt somewhere in a 
 % sl-PreemptionEnable is a gate on pre-emption ONLY. TS 38.214 clause 8.1.4's two pre-emption
 % bullets both begin "sl-PreemptionEnable is provided", so with the field absent nothing is ever
 % pre-empted -- while re-evaluation's own sentence carries no such gate and is unaffected.
-off = harness.sls.scenarioInit(40, 9);
+off = harness.sls.scenarioInit(60, 9);
 off.prioByUe(1:4:end) = 1;
 off.pool.slPreemptionEnable = '';
 kOff = harness.sls.runScenario(off, 1500);

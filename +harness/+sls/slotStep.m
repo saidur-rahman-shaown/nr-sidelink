@@ -161,8 +161,11 @@ for i = 1:nUe
             dist  = norm(scen.posXY(i, :) - air(k).posXY);
             gotTb = false;
 
-            sciBler = harness.phyabs.blerLookup(scen.pscchEffectiveMcs, sinrPscchDb(k, i), 1, ...
-                scen.channelModel, scen.speedKmh);
+            % The MEASURED PSCCH curve, not a low-MCS PSSCH lookup standing in for it. The
+            % control channel's advantage over data is 1.75 to 16 dB depending on the data's
+            % MCS -- a spread no single proxy MCS can express, and one that was guessed while
+            % the curves were a placeholder.
+            sciBler = harness.phyabs.pscchBler(air(k).mcs, sinrPscchDb(k, i));
             if rand(scen.stream) >= sciBler
                 % ---- SCI-1A decoded: recover the announced reservation -----
                 % Fed to the sensing database from the DECODED fields, not from the

@@ -137,6 +137,26 @@ receiver has **one hypothesis per position**, so at most one is decoded — the 
 survives the others as interference. That is the capture effect, and it is why a collision is
 not automatically a double loss.
 
+### The PSCCH curve is MEASURED, and the old proxy was badly wrong at high MCS
+While the BLER curve was a placeholder, the system-level model approximated PSCCH by reading
+the PSSCH curve at a deliberately low `pscchEffectiveMcs`. The reasoning — control is a much
+lower-rate code — was right; the magnitude was guessed. Measured, control's advantage over data
+is **1.75 dB at MCS 4 rising to 16 dB at MCS 20**, because PSCCH's own code rate does not move
+with the data's. No single proxy MCS can express an advantage that grows with the data rate, and
+at high MCS the proxy understated control's reach badly. `harness.phyabs.pscchBler` reads the
+measured curve; `pscchEffectiveMcs` is gone.
+
+### Switching to measured curves changed system-level behaviour, and a test caught it
+Pre-emption stopped firing at 40 UEs. Not a regression: the measured PSCCH curve is harsher than
+the invented one, so fewer SCIs decode at range, each UE's sensing database holds fewer
+reservations, fewer overlaps are detected, and pre-emption fires less. It fires 0, 1 and 2 times
+at 40, 60 and 80 UEs, so the test moved to 60. Link-level PRR moved 0.926 → 0.890 for the same
+reason.
+
+PRR-versus-distance also became **sharper**: 0.42 at 300–400 m where the placeholder gave 0.61,
+then a cliff. That is the real LDPC waterfall (about 1 dB wide) replacing a logistic that smeared
+the transition over roughly 10 dB. The shape is now the channel's, not the curve-fit's.
+
 ### PSCCH SINR is not a bandwidth advantage — that was a bug
 It is tempting to give PSCCH a noise advantage of `10*log10(L_subCH*subchSizeRb/pscchPrb)`
 because it occupies fewer PRBs. **It does not have one.** At fixed total transmit power the

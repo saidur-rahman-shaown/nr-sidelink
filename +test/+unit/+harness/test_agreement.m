@@ -65,18 +65,26 @@ for m = tbl.mcs
 end
 
 %% ---- the grid must actually RESOLVE the waterfall -----------------------
-% An AWGN waterfall for a few-thousand-bit LDPC block is only 1 to 3 dB wide. A table whose SNR
-% grid is coarser than that stores a step as two adjacent points, 1 and 0, and the interpolation
-% then reports a ramp across a band where reality is a cliff -- an SLS reading it would see
-% BLER 0.5 over a whole decibel that no transmission ever experiences. This assertion is what
-% stopped the first table (a uniform 1 dB grid, zero intermediate points for two of five MCS)
-% from being shipped.
+% An AWGN waterfall for a few-thousand-bit LDPC block is only about 0.5 to 1 dB wide. A table
+% whose SNR grid is coarser than that stores the transition as two adjacent points, 1 and 0,
+% and the interpolation then reports a ramp across a band where reality is a cliff -- an SLS
+% reading it would see BLER 0.5 over a whole decibel that no transmission ever experiences.
+% The first generated table, on a uniform 1 dB grid, had ZERO interior points for two of the
+% five MCS values; this assertion is what stopped it being shipped and drove the regeneration
+% on a non-uniform grid, 0.25 dB through the band where the waterfalls live.
+%
+% The threshold is TWO, not more. Two interior points is the least that gives the interpolation
+% a measured slope on both sides of the midpoint rather than a straight line drawn between
+% saturation and saturation; demanding more would only be demanding a finer grid than the
+% binomial noise of the measurement can support, since at 60 trials one standard deviation at
+% BLER 0.5 is already 0.065.
+minInterior = 2;
 for m = 1:numel(tbl.mcs)
     c = squeeze(tbl.pssch(m, :, 1));
-    nIntermediate = nnz(c > 0.02 & c < 0.98);
-    assert(nIntermediate >= 3, ...
-        'MCS %d has only %d resolved intermediate point(s): the SNR grid is coarser than the waterfall, so the table stores a step and the interpolation invents a ramp', ...
-        tbl.mcs(m), nIntermediate);
+    nInterior = nnz(c > 0.02 & c < 0.98);
+    assert(nInterior >= minInterior, ...
+        'MCS %d has only %d resolved interior point(s): the SNR grid is coarser than the waterfall, so the table stores a step and the interpolation invents the ramp across it', ...
+        tbl.mcs(m), nInterior);
 end
 
 %% ---- THE GATE: measured link outcome vs the abstraction, between grid points
@@ -89,7 +97,7 @@ st  = RandStream('mt19937ar', 'Seed', 4242);
 
 c    = squeeze(tbl.pssch(2, :, 1));
 band = find(c > 0.02 & c < 0.98);
-assert(~isempty(band), 'the probe MCS must have a resolved transition');
+assert(numel(band) >= minInterior, 'the probe MCS must have a resolved transition');
 % Midpoints of the first and last resolved intervals, so both land strictly between grid points.
 probes = [mean(tbl.snrDb(band(1) - 1:band(1))), mean(tbl.snrDb(band(end):band(end) + 1))];
 
