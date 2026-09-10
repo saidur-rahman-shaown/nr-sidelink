@@ -125,6 +125,48 @@ suppresses the blind retransmission that broadcast must always spend.
   would turn every data failure into a DTX — and DTX drives radio link failure (clause
   5.22.1.3.3), not retransmission, so lossy-but-alive links would be declared dead.
 
+### The receiver SEARCHES; it is not handed the transmission list
+Reception is a loop over candidate **positions** — the start of every sub-channel — not over
+the transmissions that actually exist. Clause 8.1.2.2 puts the PSCCH in the lowest sub-channel
+of whatever allocation carries it, and the receiver does not know the allocation until it has
+decoded the SCI. Iterating the transmission list instead is genie-aided: it silently grants the
+receiver knowledge of exactly what was sent and where.
+
+Two transmissions starting at the same sub-channel put their PSCCHs on the same PRBs. The
+receiver has **one hypothesis per position**, so at most one is decoded — the strongest, if it
+survives the others as interference. That is the capture effect, and it is why a collision is
+not automatically a double loss.
+
+### PSCCH SINR is not a bandwidth advantage — that was a bug
+It is tempting to give PSCCH a noise advantage of `10*log10(L_subCH*subchSizeRb/pscchPrb)`
+because it occupies fewer PRBs. **It does not have one.** At fixed total transmit power the
+spectral density is constant, so signal and noise shrink together with the band and the SNR is
+identical — this model predicted 4.8 dB on paper and measured 0.0 dB, which is the correct
+answer. Control reaches further than data because of its far lower effective **code rate**, so
+`+sls/` decodes SCI at `pscchEffectiveMcs` (the most robust point of the MCS table) rather than
+at the signalled MCS. An earlier version used a flat `sciSinrAdvantageDb = 6` fudge; it is gone.
+
+The separate PSCCH SINR is still computed, and is **not** redundant, because *interference*
+differs even when noise does not: an interferer overlapping only part of the PSSCH still covers
+all of the PSCCH's sub-channel, or none of it. Measured: a one-sub-channel interferer aligned
+on the victim's lowest sub-channel gives PSSCH 5.06 dB and PSCCH −3.91 dB.
+
+### The SCI reservation fields are encoded, and sensing is fed from the decode
+`trivEncode`/`frivEncode`/`reservationPeriodIndex` fill SCI-1A's TRIV, FRIV and reservation
+period; the receiver runs `trivDecode`/`frivDecode` and feeds
+`phy.ts38214.sensingDbRecord` from **those** values, not from the transmitter's state. A
+sensing database populated from a genie cannot be wrong about a reservation, so it cannot show
+what an undecoded SCI costs — and announcing the reservation is the entire reason sensing
+works.
+
+Wiring the fields exposed a real spec violation in the selection policy: **TRIV can signal a
+chained resource only 1..31 logical slots after the anchor**, while the selection window is
+bounded by the PDB and is routinely hundreds of slots wide. Drawing each resource independently
+produced a grant no conformant UE could announce — and nothing noticed, because a simulator
+that never builds the SCI never discovers the field will not hold the value.
+`phy.rx.policy.resourcePickChained` now draws the anchor freely and every chained resource from
+the anchor's reachable window only, degrading N rather than failing when nothing is in reach.
+
 ### The two reliability figures, which are different numbers
 - **`kpi.prr` is packet-level:** a packet counts as delivered if *any* receiver decoded it.
   This is what closes a latency figure — a packet has one latency, not one per listener — and

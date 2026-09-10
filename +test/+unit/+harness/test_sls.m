@@ -134,5 +134,61 @@ assert(kFar.nDelivered + kFar.nExpired + kFar.nMaxTx + kFar.nDropped + kFar.nInF
 assert(kFar.nExpired > 0, 'packets that were transmitted and never acknowledged must expire, not linger in flight');
 assert(kFar.nInFlight < far.nUe * 2, 'only the last generation may still be in flight, got %d', kFar.nInFlight);
 
+%% ---- the receiver SEARCHES; it is not handed the transmission list ------
+% Every chained resource must be within TRIV's reach of the anchor. TS 38.214 clause 8.1.5 and
+% TS 38.212 clause 8.3.1.1 allow 1..31 logical slots; the selection window is bounded by the
+% PDB and is routinely hundreds of slots wide, so drawing independently over it produces a
+% grant no conformant UE could announce -- and nothing notices while the SCI is never encoded.
+[~, ueW, scW] = harness.sls.run(20, 2000, 9);
+gaps = [];
+for i = 1:numel(ueW)
+    if ueW(i).grant.hasGrant && numel(ueW(i).grant.txOppSlot) > 1
+        gaps = [gaps diff(ueW(i).grant.txOppSlot)]; %#ok<AGROW>
+    end
+end
+assert(~isempty(gaps), 'the scenario must produce multi-resource grants, or this proves nothing');
+[t1Max, ~] = phy.ts38212.trivOffsetRange(2);
+assert(all(gaps >= 1 & gaps <= t1Max), 'every chained resource must be within TRIV''s reach (1..%d), got %s', t1Max, mat2str(unique(gaps)));
+
+% The sensing database must be fed from DECODED SCI fields, chained resources included. A
+% database populated from the transmitter's own state cannot be wrong about a reservation, so
+% it cannot show what an undecoded SCI costs.
+nChained = 0;
+for i = 1:numel(ueW)
+    nChained = nChained + nnz(ueW(i).db.chainedSlot1 > 0);
+end
+assert(nChained > 0, 'sensing must record the chained resources TRIV announces, got none');
+
+% TRIV and FRIV must round-trip at the values the loop actually produces.
+tv = phy.ts38212.trivEncode(2, gaps(1), 0, scW.maxNumPerReserve);
+[nRes, t1, ~] = phy.ts38212.trivDecode(tv, scW.maxNumPerReserve);
+assert(nRes == 2 && t1 == gaps(1), 'TRIV must round-trip the announced gap: %d -> %d', gaps(1), t1);
+
+%% ---- PSCCH SINR is not a bandwidth advantage, but it is not redundant ---
+% Signal and noise scale together with the band, so a narrower PSCCH has the SAME SNR. What
+% differs is INTERFERENCE: an interferer overlapping only part of the PSSCH still covers all of
+% the PSCCH's sub-channel, or none of it.
+sc = harness.sls.scenarioInit(4, 1);
+mk = @(ueId, pos, x, L) setfield(setfield(setfield(setfield(setfield( ...
+    rf.toAir(sap.txReqInit(), ueId, pos), 'startSubch', x), 'LsubCH', L), ...
+    'txPowerDbm', 23), 'tb', true(10, 1)), 'ctxIds', 1);
+
+% No interferer: the two SINRs must be identical, to the bit.
+solo = mk(1, [0 0], 0, 3);
+[sd0, ~, ~, sp0] = harness.chanmodel.slotSinr(solo, [0 0; 300 0], sc.radio, sc.numSubchannel, sc.pscchPrb, sc.subchSizeRb);
+assert(abs(sp0(1, 2) - sd0(1, 2)) < 1e-9, 'with no interference PSCCH and PSSCH SNR must be equal, got %.3f vs %.3f', sp0(1, 2), sd0(1, 2));
+
+% A narrow interferer sitting on the victim's lowest sub-channel: it covers ALL the PSCCH and
+% only part of the PSSCH, so the PSCCH is hurt far more.
+pair = [mk(1, [0 0], 0, 3), mk(2, [250 0], 0, 1)];
+[sd1, ~, ~, sp1] = harness.chanmodel.slotSinr(pair, [0 0; 250 0; 120 0], sc.radio, sc.numSubchannel, sc.pscchPrb, sc.subchSizeRb);
+assert(sp1(1, 3) < sd1(1, 3) - 5, 'a sub-channel-aligned interferer must hurt PSCCH far more than PSSCH, got %.2f vs %.2f dB', sp1(1, 3), sd1(1, 3));
+
+% Control robustness comes from CODE RATE, and the decode uses the low-rate point.
+assert(sc.pscchEffectiveMcs < sc.policy.mcs, 'SCI must be decoded at a lower effective MCS than the data');
+assert(harness.phyabs.blerLookup(sc.pscchEffectiveMcs, 0, 1, 'awgn', 0) < ...
+       harness.phyabs.blerLookup(sc.policy.mcs, 0, 1, 'awgn', 0), ...
+       'the SCI effective MCS must be more robust than the data MCS at the same SINR');
+
 fprintf('test_sls: all assertions passed.\n');
 end

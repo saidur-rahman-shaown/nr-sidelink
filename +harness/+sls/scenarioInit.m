@@ -54,10 +54,12 @@ scen.radio = struct( ...
 scen.pCmaxDbm     = 23;     % P_CMAX; slPowerControl is a max-power-always policy for now
 scen.channelModel = 'awgn';
 scen.speedKmh     = 0;
-% PSCCH carries SCI-1A at a fixed robust format while PSSCH runs at the announced MCS, so the
-% control channel decodes further out than the data. Modelled as an SINR advantage rather than
-% a second curve, since there is only a placeholder curve to be advantaged against.
-scen.sciSinrAdvantageDb = 6;
+% PSCCH carries SCI-1A at a fixed, very low effective code rate while PSSCH runs at the
+% signalled MCS, which is why control decodes further out than data. It is NOT a bandwidth
+% advantage -- see +harness/+chanmodel/slotSinr: signal and noise scale together with the band
+% and the SNR is identical. Modelled as the most robust point of the MCS table, since that is
+% the lowest code rate the placeholder BLER curve family offers.
+scen.pscchEffectiveMcs = 0;
 
 % ---- selection policy ------------------------------------------------------
 scen.policy = phy.rx.policy.defaults();
@@ -98,13 +100,21 @@ if scen.isUnicast
 else
     scen.slPsfchPeriod = 0;              % disabled in the broadcast baseline
 end
+% PSCCH occupies sl-FreqResourcePSCCH PRBs over sl-TimeResourcePSCCH symbols, inside the
+% LOWEST sub-channel of the PSSCH allocation (clause 8.1.2.2). These are the values the TBS
+% arithmetic below already assumes for N_RE^SCI1, so they are named once and reused rather than
+% written twice with a chance of drifting apart.
+scen.pscchPrb        = scen.subchSizeRb;
+scen.pscchSymbols    = 2;
+scen.maxNumPerReserve = 2;               % sl-MaxNumPerReserve; matches policy.numRetx = 1
+scen.reservePeriodListMs = [0 100];      % sl-ResourceReservePeriodList, pre-resolved to ms
 scen.minTimeGapPsfch = 2;                % sl-MinTimeGapPSFCH, in pool slots
 scen.psfchRbSetSize  = scen.numSubchannel * max(1, scen.slPsfchPeriod);  % M_PRB,set^PSFCH
 scen.psfchNumMuxCsPair = 6;              % sl-NumMuxCS-Pair, N_CS^PSFCH
 scen.psfchNtype        = 1;              % sl-PSFCH-CandidateResourceType = startSubCH
 scen.slMaxTransNum             = 1 + scen.policy.numRetx + 2;
 scen.slMaxNumConsecutiveDTX    = 4;
-nReSci1 = 2 * scen.subchSizeRb * 12;     % PSCCH: 2 symbols over one sub-channel's PRBs
+nReSci1 = scen.pscchSymbols * scen.pscchPrb * 12;   % PSCCH REs, from the fields above
 
 tbsBytesByLsubCH = zeros(1, scen.numSubchannel);
 for L = 1:scen.numSubchannel

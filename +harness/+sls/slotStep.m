@@ -103,7 +103,8 @@ else
 end
 
 % ---- 5. CHANNEL: once for the slot, so interference is a slot property ----
-[sinrDb, rxPowerDbm, canHear] = harness.chanmodel.slotSinr(air, scen.posXY, scen.radio, scen.numSubchannel);
+[sinrDb, rxPowerDbm, canHear, sinrPscchDb] = harness.chanmodel.slotSinr(air, scen.posXY, ...
+    scen.radio, scen.numSubchannel, scen.pscchPrb, scen.subchSizeRb);
 
 % ---- 6. RX ----------------------------------------------------------------
 isTx = false(1, nUe);
@@ -117,47 +118,75 @@ for i = 1:nUe
         ue(i).db = phy.ts38214.sensingDbMarkUnmonitored(ue(i).db, nLog);
         continue;
     end
-    for k = 1:numel(air)
-        if ~canHear(k, i)
-            continue;                          % out of the pair statistic entirely: a
-        end                                    % half-duplex slot is not a failed link
-        % Every hearing pair is logged, decoded or not. PRR is a per-LINK quantity and the
-        % denominator has to include the links that failed.
-        dist = norm(scen.posXY(i, :) - air(k).posXY);
-        gotTb = false;
-
-        % SCI-1A first: a fixed robust format, so it decodes further out than the data. This
-        % separation is what makes sensing see the far UEs whose reservations matter most.
-        sciBler = harness.phyabs.blerLookup(scen.policy.mcs, sinrDb(k, i) + scen.sciSinrAdvantageDb, ...
-            1, scen.channelModel, scen.speedKmh);
-        if rand(scen.stream) >= sciBler
-            ue(i).db = phy.ts38214.sensingDbRecord(ue(i).db, nLog, air(k).startSubch, air(k).LsubCH, ...
-                air(k).prioTx, rxPowerDbm(k, i), true, scen.policy.prsvpTxMs, 1, 0, 0, 0, 0);
-
-            tbBler = harness.phyabs.blerLookup(air(k).mcs, sinrDb(k, i), air(k).rv + 1, ...
-                scen.channelModel, scen.speedKmh);
-            gotTb = rand(scen.stream) >= tbBler;
-            if gotTb
-                [ue, resolved] = deliver(ue, resolved, air(k), nPhys, codes);
-            end
-            % Feedback is owed on the strength of the CONTROL decode, not the data decode: a
-            % NACK is precisely the report that the SCI was seen and the transport block was
-            % not. Owing feedback only on success would turn every data failure into a DTX,
-            % and DTX drives radio link failure (clause 5.22.1.3.3) rather than
-            % retransmission -- so lossy-but-alive links would be declared dead.
-            if scen.isUnicast && air(k).harqFeedbackEnabled == 1 && air(k).dstL2Id == ue(i).srcL2Id
-                ue(i).psfchTx(end + 1) = struct( ...
-                    'slot',       phy.ts38213.psfchTiming(nLog, scen.minTimeGapPsfch, scen.slPsfchPeriod), ...
-                    'toUeId',     air(k).ueId, ...
-                    'ack',        gotTb, ...
-                    'procIdx',    air(k).harqId + 1, ...
-                    'psschSlot',  nLog, ...
-                    'startSubch', air(k).startSubch, ...
-                    'srcL1Id',    mod(air(k).srcL2Id, 256));
-            end
+    % ---- BLIND PSCCH SEARCH, one hypothesis per sub-channel start ---------
+    % A receiver is not handed the transmission list. It searches for a PSCCH at the start of
+    % EVERY sub-channel, because clause 8.1.2.2 puts the PSCCH in the lowest sub-channel of
+    % whatever allocation carries it and the receiver does not know the allocation yet. This
+    % loop is over candidate POSITIONS, not over transmissions -- iterating the transmissions
+    % directly, as this loop did before, is genie-aided: it silently grants the receiver
+    % knowledge of exactly what was sent and where.
+    for x = 0:scen.numSubchannel - 1
+        here = find([air.startSubch] == x);
+        here = here(canHear(here, i));
+        if isempty(here)
+            continue;                      % nothing transmitted at this position
         end
-        rxLog.distM(end + 1) = dist;
-        rxLog.ok(end + 1)    = gotTb;
+        % Two transmissions starting at the same sub-channel put their PSCCHs on the same PRBs.
+        % The receiver has ONE hypothesis per position, so at most one can be decoded: the
+        % strongest, if it survives the others as interference. That is the capture effect, and
+        % it is why a collision is not automatically a double loss.
+        [~, order] = sort(sinrPscchDb(here, i), 'descend');
+        here = here(order);
+
+        for k = here
+            dist  = norm(scen.posXY(i, :) - air(k).posXY);
+            gotTb = false;
+
+            sciBler = harness.phyabs.blerLookup(scen.pscchEffectiveMcs, sinrPscchDb(k, i), 1, ...
+                scen.channelModel, scen.speedKmh);
+            if rand(scen.stream) >= sciBler
+                % ---- SCI-1A decoded: recover the announced reservation -----
+                % Fed to the sensing database from the DECODED fields, not from the
+                % transmitter's own state. A sensing database populated from a genie cannot be
+                % wrong about a reservation, so it cannot show what an undecoded SCI costs.
+                [nRes, t1, t2] = phy.ts38212.trivDecode(air(k).trivIdx, scen.maxNumPerReserve);
+                [nStart1, nStart2] = phy.ts38212.frivDecode(air(k).frivIdx, air(k).LsubCH, ...
+                    scen.numSubchannel, scen.maxNumPerReserve);
+                periodMs = scen.reservePeriodListMs(air(k).prsvpTxIdx + 1);
+                ue(i).db = phy.ts38214.sensingDbRecord(ue(i).db, nLog, x, air(k).LsubCH, ...
+                    air(k).prioTx, rxPowerDbm(k, i), periodMs > 0, periodMs, ...
+                    nRes, t1, t2, nStart1, nStart2);
+
+                tbBler = harness.phyabs.blerLookup(air(k).mcs, sinrDb(k, i), air(k).rv + 1, ...
+                    scen.channelModel, scen.speedKmh);
+                gotTb = rand(scen.stream) >= tbBler;
+                if gotTb
+                    [ue, resolved] = deliver(ue, resolved, air(k), nPhys, codes);
+                end
+                % Feedback is owed on the strength of the CONTROL decode, not the data decode:
+                % a NACK is precisely the report that the SCI was seen and the transport block
+                % was not. Owing feedback only on success would turn every data failure into a
+                % DTX, and DTX drives radio link failure (clause 5.22.1.3.3) rather than
+                % retransmission -- so lossy-but-alive links would be declared dead.
+                if scen.isUnicast && air(k).harqFeedbackEnabled == 1 && air(k).dstL2Id == ue(i).srcL2Id
+                    ue(i).psfchTx(end + 1) = struct( ...
+                        'slot',       phy.ts38213.psfchTiming(nLog, scen.minTimeGapPsfch, scen.slPsfchPeriod), ...
+                        'toUeId',     air(k).ueId, ...
+                        'ack',        gotTb, ...
+                        'procIdx',    air(k).harqId + 1, ...
+                        'psschSlot',  nLog, ...
+                        'startSubch', air(k).startSubch, ...
+                        'srcL1Id',    mod(air(k).srcL2Id, 256));
+                end
+                rxLog.distM(end + 1) = dist;
+                rxLog.ok(end + 1)    = gotTb;
+                break;                     % this position's hypothesis is spent
+            end
+            % Control lost. Still a link that existed and failed, so it belongs in the pair
+            % statistic's denominator.
+            rxLog.distM(end + 1) = dist;
+            rxLog.ok(end + 1)    = false;
+        end
     end
 end
 
@@ -384,6 +413,23 @@ else
 end
 t.prioTx       = scen.traffic.prio;
 t.txPowerDbm   = phy.ts38213.slPowerControl('PSSCH', scen.pCmaxDbm, 0, 0, 0, scen.mu, t.LsubCH * scen.subchSizeRb);
+
+% ---- the SCI-1A reservation fields, actually encoded ---------------------
+% Announcing the reservation is the whole reason sensing works: a receiver that decodes this
+% SCI learns where this UE will transmit NEXT, both the chained retransmissions (TRIV/FRIV)
+% and the periodic repetition (reservation period). Leaving these at zero -- as this loop did
+% until the fields were wired -- leaves every UE's sensing database blind to the future and
+% makes phy.ts38214.candidateSet exclude nothing, which looks like an empty, healthy pool.
+t.prsvpTxIdx = phy.ts38213.reservationPeriodIndex(scen.policy.prsvpTxMs, scen.reservePeriodListMs);
+remaining    = u.grant.txOppSlot(opp:end) - u.grant.txOppSlot(opp);
+nAnnounce    = min(numel(remaining), scen.maxNumPerReserve);
+tOff = [0 0];
+tOff(1:max(0, nAnnounce - 1)) = remaining(2:nAnnounce);
+t.trivIdx = phy.ts38212.trivEncode(nAnnounce, tOff(1), tOff(2), scen.maxNumPerReserve);
+nStart = [0 0];
+chained = u.grant.txOppStartSubch(opp:end);
+nStart(1:max(0, nAnnounce - 1)) = chained(2:nAnnounce);
+t.frivIdx = phy.ts38212.frivEncode(nStart(1), nStart(2), t.LsubCH, scen.numSubchannel, scen.maxNumPerReserve);
 t.ctxIds       = [u.curCtx.pktId];
 sent           = true;
 
@@ -489,17 +535,12 @@ end
     scen.pool.sensingWindowMs, scen.mu, u.db, scen.pool.thresholdListDbm, scen.pool.txPercentage, ...
     scen.pool.allowedPeriodsMs, scen.pool.T2minRaw, scen.TmaxPrime, scen.policy.maxEscalations);
 
-% One initial transmission plus policy.numRetx blind retransmissions, drawn independently.
-nOpp = 1 + scen.policy.numRetx;
-slots = zeros(1, nOpp); subch = zeros(1, nOpp);
-for j = 1:nOpp
-    [slots(j), subch(j)] = phy.rx.policy.resourcePick(candY, candX, survivor, rand(scen.stream));
-end
-[slots, order] = sort(slots);
-subch = subch(order);
-% Distinct slots only: two opportunities in one slot is one transmission, not two.
-[slots, keep] = unique(slots, 'stable');
-subch = subch(keep);
+% The chained resources must land inside TRIV's reach of the anchor -- 1..31 logical slots,
+% TS 38.214 clause 8.1.5. Drawing them independently over a selection window hundreds of slots
+% wide, as this loop did before the SCI fields were encoded, produces a grant no conformant UE
+% could announce, and nothing notices while the SCI is never built.
+draws = rand(scen.stream, 1, scen.maxNumPerReserve);
+[slots, subch] = phy.rx.policy.resourcePickChained(candY, candX, survivor, draws, scen.maxNumPerReserve);
 
 u.grant     = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, true, counter);
 u.periodIdx = 0;
