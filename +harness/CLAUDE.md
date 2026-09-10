@@ -167,6 +167,50 @@ that never builds the SCI never discovers the field will not hold the value.
 `phy.rx.policy.resourcePickChained` now draws the anchor freely and every chained resource from
 the anchor's reachable window only, degrading N rather than failing when nothing is in reach.
 
+### Clause 5.22.1.2a: re-evaluation and pre-emption
+Both run **before** clause 5.22.1.2's reselection check, because they are what can make a grant
+unusable: a resource failing either clears the grant, and the reselection check then sees "there
+is no selected sidelink grant" and reselects. Running them after would let a doomed grant
+survive one more period. `kpi.nReeval` and `kpi.nPreempt` report the counts.
+
+**The check runs at exactly `m - T_3`, not anywhere in `[m - T_3, m)`.** This is correctness,
+not performance. The comparison asks "is my reserved resource still in S_A?", and S_A is
+enumerated over `[n + T1, n + T2]` with `T1 >= T_proc,1 = T_3`. A resource *closer* than T_3 to
+now cannot appear in any legal candidate set — not because it is bad, but because it is too soon
+to select anything there. Checking later makes every resource look excluded.
+
+**Only the resources due at that instant are passed in.** Both modules re-derive due-ness from
+`currentSlot >= grantSlot - T3`, which is also true for every resource **already in the past** —
+and a past resource can never appear in a candidate set built forward from now, so it gets
+flagged every time. Filtering to the due subset is what makes the modules' own due test agree
+with the caller's rather than fight it.
+
+Both bugs had the same quiet symptom: **transmissions per delivery collapsed to 1.00**, because
+no grant survived long enough to reach its own retransmission opportunity, while delivery still
+mostly worked and every other KPI looked plausible. The test pins `tx/delivery > 1.8`.
+
+`signalled` is the exact partition between the two checks — resources **not yet** announced go to
+re-evaluation, **already** announced to pre-emption, and the two never merge. For a periodic
+grant: the anchor is announced by the *previous* period's SCI through the reservation-period
+field, so it is signalled from the second period onward; the chained resources are announced by
+*this* period's anchor SCI, so they become signalled when that transmission goes out. That is a
+model of the announcement, not a quotation — the clause defines `m` per resource and leaves the
+bookkeeping to the implementation.
+
+**Pre-emption cannot fire in a single-priority population, and that is correct.** The comparison
+is strict (`+mac/CLAUDE.md`: equal priorities must not pre-empt, or two UEs pre-empt each other
+indefinitely and neither transmits). So `scen.prioByUe` is a per-UE *vector*: leaving priority a
+scalar would make that structural impossibility indistinguishable from a wiring bug. Measured on
+one seed and geometry, 40 UEs: uniform priority gives 0 pre-emptions, a quarter of the UEs
+raised to priority 1 gives 2.
+
+**Simplification, stated rather than hidden:** the whole grant is cleared and reselected instead
+of replacing only the offending resource. `+mac/CLAUDE.md` lists "which replacement to pick after
+re-evaluation or pre-emption" among the `+phy/+rx/+policy/` decisions that are not built, and
+this is that gap. Clearing everything is conservative — it never keeps a resource the clause says
+to drop — but it discards good resources with the bad, costing more reselections than a
+conformant UE would perform.
+
 ### The two reliability figures, which are different numbers
 - **`kpi.prr` is packet-level:** a packet counts as delivered if *any* receiver decoded it.
   This is what closes a latency figure — a packet has one latency, not one per listener — and

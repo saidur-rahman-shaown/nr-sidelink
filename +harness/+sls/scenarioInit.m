@@ -70,7 +70,8 @@ scen.pool = struct( ...
     'allowedPeriodsMs', 100, ...                   % sl-ResourceReservePeriodList
     'T2minRaw',         20, ...                    % sl-SelectionWindow
     'slProbResourceKeep', 0.4, ...
-    'slReselectAfter',  Inf);                      % not configured: never fires on unused periods
+    'slReselectAfter',  Inf, ...
+    'slPreemptionEnable', 'enabled');       % sl-PreemptionEnable-r16; '' disables it entirely                      % not configured: never fires on unused periods
 
 % ---- traffic ---------------------------------------------------------------
 pqi = 55;                                % CAM-like periodic awareness, the pqiTable default row
@@ -158,6 +159,14 @@ if onePdu > scen.maxTbsBytes
 end
 
 % ---- geometry: a line of UEs, stationary -----------------------------------
+% Per-UE sl-Priority, uniform by default. A vector rather than a scalar because pre-emption's
+% comparison is STRICT (+mac/CLAUDE.md: only a numerically smaller sl-Priority pre-empts, or
+% two same-priority UEs pre-empt each other indefinitely) -- so in a single-priority population
+% clause 5.22.1.2a's pre-emption check can NEVER fire, by construction. Leaving priority a
+% scalar would make that structural impossibility look like a wiring bug, and would make it
+% impossible to tell the two apart.
+scen.prioByUe = repmat(scen.traffic.prio, 1, nUe);
+
 scen.nUe   = nUe;
 scen.spacingM = 20;
 scen.posXY = [(0:nUe - 1)' * scen.spacingM, zeros(nUe, 1)];

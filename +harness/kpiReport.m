@@ -1,4 +1,4 @@
-function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxDistM, rxOk, nRlf)
+function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxDistM, rxOk, nRlf, nReeval, nPreempt)
 %kpiReport Latency, reliability and throughput from resolved packet contexts.
 %Spec:   none -- KPI definitions. They are the reason the tree exists, so each one states what
 %        it counts and, where it matters, what it deliberately does not.
@@ -102,6 +102,12 @@ end
 kpi.prrLink = mean(rxOk);
 kpi.nPairs  = numel(rxOk);
 kpi.nRlf    = nRlf;
+% Clause 5.22.1.2a activity. Reported because both numbers are load indicators that no other
+% KPI shows: re-evaluation rises when the pool is churning under the UE's feet before it has
+% committed, pre-emption when higher-priority traffic is taking committed resources away. Zero
+% for both in a quiet pool is expected; zero in a congested one means the checks are not wired.
+kpi.nReeval  = nReeval;
+kpi.nPreempt = nPreempt;
 end
 
 function v = pct(x, p)

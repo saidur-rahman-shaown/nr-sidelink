@@ -190,5 +190,41 @@ assert(harness.phyabs.blerLookup(sc.pscchEffectiveMcs, 0, 1, 'awgn', 0) < ...
        harness.phyabs.blerLookup(sc.policy.mcs, 0, 1, 'awgn', 0), ...
        'the SCI effective MCS must be more robust than the data MCS at the same SINR');
 
+%% ---- clause 5.22.1.2a: re-evaluation and pre-emption are wired ----------
+% Both checks run at EXACTLY m - T_3, and only the resources due at that instant are passed to
+% them. Both modules re-derive due-ness from `currentSlot >= grantSlot - T3`, which is also true
+% for every resource already in the PAST -- and a past resource can never appear in a candidate
+% set built forward from now, so it gets flagged every time. The symptom is quiet: transmissions
+% per delivery collapses to 1.00 because no grant survives to reach its own retransmission
+% opportunity, while delivery still mostly works.
+quiet = harness.sls.run(10, 1500, 9);
+assert(quiet.txPerDelivery > 1.8, 'grants must survive to their retransmission opportunity; tx/delivery %.2f means the checks are clearing every grant', quiet.txPerDelivery);
+assert(quiet.nReeval == 0, 'a lightly loaded pool should need no re-evaluation, got %d', quiet.nReeval);
+
+% Pre-emption CANNOT fire in a single-priority population: +mac/CLAUDE.md's trap says the
+% comparison is strict, or two same-priority UEs pre-empt each other indefinitely and neither
+% ever transmits. So zero here is the structurally correct answer, not a wiring failure -- which
+% is exactly why the mixed-priority case below has to exist to tell the two apart.
+uniform = harness.sls.scenarioInit(40, 9);
+kUni = harness.sls.runScenario(uniform, 1500);
+assert(all(uniform.prioByUe == uniform.prioByUe(1)), 'the default scenario must be single-priority for this to mean anything');
+assert(kUni.nPreempt == 0, 'pre-emption must never fire between equal priorities, got %d', kUni.nPreempt);
+
+% With a higher-priority class present it does fire, on the same seed and geometry.
+mixed = harness.sls.scenarioInit(40, 9);
+mixed.prioByUe(1:4:end) = 1;                 % 1 is the HIGHEST priority
+kMix = harness.sls.runScenario(mixed, 1500);
+assert(kMix.nPreempt > 0, 'a higher-priority class must pre-empt somewhere in a loaded pool, got %d', kMix.nPreempt);
+
+% sl-PreemptionEnable is a gate on pre-emption ONLY. TS 38.214 clause 8.1.4's two pre-emption
+% bullets both begin "sl-PreemptionEnable is provided", so with the field absent nothing is ever
+% pre-empted -- while re-evaluation's own sentence carries no such gate and is unaffected.
+off = harness.sls.scenarioInit(40, 9);
+off.prioByUe(1:4:end) = 1;
+off.pool.slPreemptionEnable = '';
+kOff = harness.sls.runScenario(off, 1500);
+assert(kOff.nPreempt == 0, 'with sl-PreemptionEnable absent nothing may be pre-empted, got %d', kOff.nPreempt);
+assert(kOff.nReeval == kMix.nReeval, 'sl-PreemptionEnable must not affect re-evaluation: %d vs %d', kOff.nReeval, kMix.nReeval);
+
 fprintf('test_sls: all assertions passed.\n');
 end

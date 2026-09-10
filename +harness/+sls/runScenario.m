@@ -25,10 +25,14 @@ end
 resolved = repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0);
 nTx      = 0;
 nRlf     = 0;
+nReeval  = 0;
+nPreempt = 0;
 rxDist   = zeros(1, 0);
 rxOk     = false(1, 0);
 for n = 0:nSlots - 1
-    [ue, scen, done, air, rxLog, rlf] = harness.sls.slotStep(ue, scen, n);
+    [ue, scen, done, air, rxLog, rlf, nR, nP] = harness.sls.slotStep(ue, scen, n);
+    nReeval  = nReeval + nR;
+    nPreempt = nPreempt + nP;
     resolved = [resolved done];  %#ok<AGROW>
     nTx      = nTx + numel(air);
     nRlf     = nRlf + rlf;
@@ -37,5 +41,5 @@ for n = 0:nSlots - 1
 end
 
 nGenerated = sum([ue.nextPktId]) - scen.nUe;   % nextPktId starts at 1 on every UE
-kpi = harness.kpiReport(resolved, nGenerated, nSlots, scen, nTx, rxDist, rxOk, nRlf);
+kpi = harness.kpiReport(resolved, nGenerated, nSlots, scen, nTx, rxDist, rxOk, nRlf, nReeval, nPreempt);
 end

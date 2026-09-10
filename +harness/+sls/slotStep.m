@@ -1,4 +1,4 @@
-function [ue, scen, resolved, air, rxLog, nRlf] = slotStep(ue, scen, nPhys)
+function [ue, scen, resolved, air, rxLog, nRlf, nReeval, nPreempt] = slotStep(ue, scen, nPhys)
 %slotStep Advance the whole scenario by one slot.
 %Spec:   none itself; it sequences modules that each cite their own clause. The intra-slot
 %        ordering is +harness/CLAUDE.md's, with one documented reordering -- see below.
@@ -11,6 +11,8 @@ function [ue, scen, resolved, air, rxLog, nRlf] = slotStep(ue, scen, nPhys)
 %         air       1 x nTx struct array of what was transmitted, for logging
 %         rxLog     scalar struct: .distM and .ok, one entry per (transmission, hearing
 %         nRlf      integer -- radio link failures indicated this slot (clause 5.22.1.3.3)
+%         nReeval   integer -- resources re-evaluation flagged for replacement this slot
+%         nPreempt  integer -- resources pre-emption flagged this slot
 %         rxLog fields, continued: one entry per (transmission, hearing receiver) PAIR. This is the raw material for PRR-versus-distance, which is
 %                   a per-LINK statistic and cannot be recovered from packet outcomes -- see
 %                   +harness/kpiReport
@@ -40,6 +42,8 @@ resolved = repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0);
 nUe      = scen.nUe;
 rxLog    = struct('distM', zeros(1, 0), 'ok', false(1, 0));
 nRlf     = 0;
+nReeval  = 0;
+nPreempt = 0;
 
 % ---- 1. TIMING ------------------------------------------------------------
 nLog = scen.logicalOfPhys(nPhys + 1);
@@ -53,7 +57,7 @@ periodLogical = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, scen
 for i = 1:nUe
     if app.trafficPeriodic(nPhys, scen.traffic.periodSlots, ue(i).trafficOffset)
         c = sap.ctxInit(ue(i).nextPktId, ue(i).srcL2Id, ue(i).dstL2Id, scen.traffic.pqi, ...
-            scen.traffic.prio, scen.traffic.pdbMs, scen.traffic.sizeBytes, scen.traffic.lcid, nPhys);
+            ue(i).prio, scen.traffic.pdbMs, scen.traffic.sizeBytes, scen.traffic.lcid, nPhys);
         ue(i).lch       = sap.lchEnqueue(ue(i).lch, c, nPhys);
         ue(i).nextPktId = ue(i).nextPktId + 1;
     end
@@ -196,10 +200,122 @@ if scen.isUnicast
     resolved = [resolved fbResolved];
 end
 
-% ---- 8. MAC: period boundaries, then the reselection check ----------------
+% ---- 8. MAC: re-evaluation and pre-emption, then the reselection check ----
+% Clause 5.22.1.2a's two checks run BEFORE clause 5.22.1.2's, because they are what can make
+% the grant unusable: a resource that fails either is cleared, and the reselection check then
+% sees "there is no selected sidelink grant" and reselects. Running them after would let a
+% doomed grant survive one more period.
 for i = 1:nUe
+    [ue(i), scen, nR, nP] = reevalPreemptPhase(ue(i), scen, nLog, periodLogical);
+    nReeval  = nReeval + nR;
+    nPreempt = nPreempt + nP;
     [ue(i), scen] = macPhase(ue(i), scen, nLog, periodLogical);
 end
+end
+
+% =========================================================================
+function [u, scen, nReeval, nPreempt] = reevalPreemptPhase(u, scen, nLog, periodLogical)
+%reevalPreemptPhase Clause 5.22.1.2a's re-evaluation and pre-emption checks.
+%Spec:   TS 38.321 V16.22.0 clause 5.22.1.2a, via +mac/reevaluation and +mac/preemption; the
+%        lead time T_3 is TS 38.214 clause 8.1.4's T_proc,1^SL.
+%
+%THE TWO CHECKS ARE COMPLEMENTS AND ARE NEVER MERGED
+%----------------------------------------------------
+%+mac/CLAUDE.md is explicit: "Re-evaluation and pre-emption operate on different resource sets
+%with different timing. Never merge them; never let one call the other." Re-evaluation covers
+%resources NOT YET announced by an SCI and asks "is my intended resource still a good choice?";
+%pre-emption covers ALREADY-announced ones and asks "has someone higher-priority taken it?".
+%`signalled` is the exact partition between them, computed once here and handed to both.
+%
+%WHAT `signalled` MEANS FOR A PERIODIC GRANT
+%--------------------------------------------
+%  - The anchor (resource 1) is announced by the PREVIOUS period's SCI, through the reservation
+%    period field -- so it is signalled from the second period onward, and only then.
+%  - The chained resources are announced by THIS period's anchor SCI, so they become signalled
+%    the moment that transmission goes out (grant.txOppUsed(1)).
+%This is a model of the announcement, not a quotation: the clause defines m per resource and
+%leaves the bookkeeping to the implementation.
+
+nReeval  = 0;
+nPreempt = 0;
+if ~u.grant.hasGrant
+    return;
+end
+T3   = phy.ts38214.procTimeSelection(scen.mu);
+nOpp = numel(u.grant.txOppSlot);
+
+resSlot  = u.grant.txOppSlot + u.periodIdx * periodLogical;
+resSubch = u.grant.txOppStartSubch;
+
+signalled = false(1, nOpp);
+signalled(1) = u.periodIdx > 0;
+if nOpp > 1
+    signalled(2:end) = u.grant.txOppUsed(1);
+end
+
+% Run the check at EXACTLY m - T_3, not anywhere in [m - T_3, m).
+%
+% This is not a performance choice, it is a correctness one, and getting it wrong is silent.
+% The comparison asks "is my reserved resource still in S_A?", and S_A is enumerated over
+% [n + T1, n + T2] with T1 >= T_proc,1 = T_3. A resource CLOSER than T_3 to the current slot
+% therefore cannot appear in any legal candidate set -- not because it is a bad resource, but
+% because it is too soon to select anything there. Checking at any slot after m - T_3 makes
+% every resource look excluded, so every grant gets cleared, every period, forever. The
+% symptom is subtle: transmissions per delivery collapses to 1.00 because no grant survives
+% long enough to reach its own retransmission opportunity, while delivery still mostly works.
+%
+% Clause 5.22.1.2a NOTE 1 does permit checking later ("before 'm - T_3' or after 'm - T_3' but
+% before 'm'"), but a later check must compare against something other than a fresh S_A, and
+% that is a different algorithm rather than a different constant.
+due = (nLog == resSlot - T3);
+if ~any(due)
+    return;
+end
+
+% The window then starts exactly on the resource under check. Setting the remaining PDB equal
+% to T2 keeps the request legal in both of clause 8.1.4's branches without needing to know
+% which one it is in -- the same argument phy.rx.policy.selectionWindow makes.
+T1 = T3;
+T2 = max(resSlot(due)) - nLog;
+if T2 < T1
+    return;
+end
+req = struct('n', nLog, 'T1', T1, 'T2', T2, 'remainingPdbSlots', T2, ...
+    'LsubCH', u.grant.lSubch, 'prioTx', u.prio, ...
+    'prsvpTxMs', scen.policy.prsvpTxMs, 'Cresel', max(1, u.grant.counter * 10));
+[candY, candX, survivor, ~, ~, thrOffsetDb] = phy.ts38214.candidateSet(req, ...
+    scen.numSubchannel, scen.pool.sensingWindowMs, scen.mu, u.db, scen.pool.thresholdListDbm, ...
+    scen.pool.txPercentage, scen.pool.allowedPeriodsMs, scen.pool.T2minRaw, scen.TmaxPrime, ...
+    scen.policy.maxEscalations);
+
+% ONLY the resources due at this exact slot are passed. Both modules re-derive due-ness from
+% `currentSlot >= grantSlot - T3`, which is also true for every resource ALREADY IN THE PAST --
+% and a past resource can never be in a candidate set built forward from now, so it is flagged
+% for reselection every single time. Filtering to the due subset here is what makes the
+% modules' own due test agree with this caller's rather than fight it.
+needsReselect = mac.reevaluation(resSlot(due), resSubch(due), signalled(due), nLog, T3, ...
+    candY, candX, survivor);
+
+% Pre-emption consumes candidateSet's ESCALATED threshold offset, which
+% +phy/+ts38214/CLAUDE.md records as being returned specifically for this. Using the raw table
+% value makes a congested pool pre-empt far more than it should.
+preempted = mac.preemption(resSlot(due), resSubch(due), u.grant.lSubch, signalled(due), ...
+    u.prio, nLog, T3, u.db, scen.pool.thresholdListDbm, thrOffsetDb, ...
+    scen.pool.slPreemptionEnable);
+
+nReeval  = nnz(needsReselect);
+nPreempt = nnz(preempted);
+if nReeval == 0 && nPreempt == 0
+    return;
+end
+
+% SIMPLIFICATION, stated rather than hidden: the whole grant is cleared and reselected, instead
+% of replacing only the offending resource. +mac/CLAUDE.md lists "which replacement to pick
+% after re-evaluation or pre-emption" among the +phy/+rx/+policy/ decisions that are NOT built,
+% and this is that gap. Clearing everything is conservative -- it never keeps a resource the
+% clause says to drop -- but it discards good resources with the bad and so over-reacts,
+% costing more reselections than a conformant UE would perform.
+u.grant = mac.grantClear(u.grant);
 end
 
 % =========================================================================
@@ -411,7 +527,7 @@ else
     t.castType            = sap.castTypes().broadcast;
     t.harqFeedbackEnabled = 0;
 end
-t.prioTx       = scen.traffic.prio;
+t.prioTx       = u.prio;
 t.txPowerDbm   = phy.ts38213.slPowerControl('PSSCH', scen.pCmaxDbm, 0, 0, 0, scen.mu, t.LsubCH * scen.subchSizeRb);
 
 % ---- the SCI-1A reservation fields, actually encoded ---------------------
@@ -526,7 +642,7 @@ cresel   = mac.cresel(counter, true);
 nSdu     = numel(u.lch.q);
 pduBytes = min(scen.maxTbsBytes, ...
     scen.macOverheadFixedBytes + nSdu * scen.macOverheadPerSduBytes + sum(avail));
-[req, feasible] = phy.rx.policy.selectionRequest(nLog, scen.mu, remLogical, scen.traffic.prio, cresel, scen.policy, pduBytes);
+[req, feasible] = phy.rx.policy.selectionRequest(nLog, scen.mu, remLogical, u.prio, cresel, scen.policy, pduBytes);
 if ~feasible
     return;
 end
