@@ -224,7 +224,23 @@ off.prioByUe(1:4:end) = 1;
 off.pool.slPreemptionEnable = '';
 kOff = harness.sls.runScenario(off, 1500);
 assert(kOff.nPreempt == 0, 'with sl-PreemptionEnable absent nothing may be pre-empted, got %d', kOff.nPreempt);
-assert(kOff.nReeval == kMix.nReeval, 'sl-PreemptionEnable must not affect re-evaluation: %d vs %d', kOff.nReeval, kMix.nReeval);
+% Re-evaluation is NOT gated -- its own sentence in clause 8.1.4 carries no such condition -- so
+% it still fires. Its COUNT is deliberately not compared against the enabled run: a pre-emption
+% that fires replaces a resource, which changes that UE's grant and everything downstream of it,
+% so the two runs diverge and their re-evaluation counts legitimately differ (4 against 5 on
+% this seed). Asserting equality would be the same over-constraint +mac/CLAUDE.md records the
+% suite making with the first NDI value -- a claim stronger than the spec's.
+assert(kOff.nReeval > 0, 'sl-PreemptionEnable must not gate re-evaluation, but none fired at all');
+
+% The third case, and the one +mac/CLAUDE.md calls easy to miss: 'plN' is not a synonym for
+% 'enabled'. TS 38.214 clause 8.1.4 adds a SECOND strict test, prio_RX < prio_pre, on top of
+% prio_TX > prio_RX. With prio_pre = 1 and the pre-empting traffic itself at priority 1, 1 < 1
+% is false, so nothing is pre-empted even though the field IS provided.
+pl = harness.sls.scenarioInit(40, 9);
+pl.prioByUe(1:4:end) = 1;
+pl.pool.slPreemptionEnable = 'pl1';
+kPl = harness.sls.runScenario(pl, 1500);
+assert(kPl.nPreempt == 0, '''pl1'' must reject a pre-emptor already at priority 1, since prio_RX < prio_pre is strict; got %d', kPl.nPreempt);
 
 fprintf('test_sls: all assertions passed.\n');
 end

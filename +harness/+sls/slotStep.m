@@ -309,13 +309,34 @@ if nReeval == 0 && nPreempt == 0
     return;
 end
 
-% SIMPLIFICATION, stated rather than hidden: the whole grant is cleared and reselected, instead
-% of replacing only the offending resource. +mac/CLAUDE.md lists "which replacement to pick
-% after re-evaluation or pre-emption" among the +phy/+rx/+policy/ decisions that are NOT built,
-% and this is that gap. Clearing everything is conservative -- it never keeps a resource the
-% clause says to drop -- but it discards good resources with the bad and so over-reacts,
-% costing more reselections than a conformant UE would perform.
-u.grant = mac.grantClear(u.grant);
+% Clause 5.22.1.2a is explicit about what happens next, and it is NOT "clear the grant":
+%   "2> remove the resource(s) from the selected sidelink grant ..."
+%   "2> randomly select the time and frequency resource from the resources indicated by the
+%       physical layer ... for either the removed resource or the dropped resource ..."
+%   "2> replace the removed or dropped resource(s) by the selected resource(s) ..."
+% So each flagged resource is swapped individually and the rest of the grant survives. Clearing
+% the whole grant -- which this loop did first -- is conservative but over-reacts: it discards
+% good resources with the bad, costs more reselections than a conformant UE performs, and
+% inflates the access delay every one of those reselections adds.
+dueIdx  = find(due);
+flagged = dueIdx([needsReselect | preempted]);
+for r = flagged
+    kept = u.grant.txOppSlot(setdiff(1:nOpp, r)) + u.periodIdx * periodLogical;
+    minGap = phy.rx.policy.minResourceGapSlots(nLog, scen.slPsfchPeriod, ...
+        scen.minTimeGapPsfch, scen.policy.psfchProcSlots);
+    [newSlot, newSubch, found] = phy.rx.policy.resourceReplace(candY, candX, survivor, ...
+        kept, minGap, scen.maxNumPerReserve, rand(scen.stream));
+    if found
+        u.grant = mac.grantReplaceResource(u.grant, r, newSlot - u.periodIdx * periodLogical, newSubch);
+    else
+        % NOTE 2 leaves the no-candidate case to UE implementation. Clearing the grant is this
+        % implementation's answer: the reselection check then sees "there is no selected
+        % sidelink grant" and starts a fresh selection, which is the only option that does not
+        % keep a resource clause 5.22.1.2a has just said to remove.
+        u.grant = mac.grantClear(u.grant);
+        return;
+    end
+end
 end
 
 % =========================================================================
@@ -655,8 +676,13 @@ end
 % TS 38.214 clause 8.1.5. Drawing them independently over a selection window hundreds of slots
 % wide, as this loop did before the SCI fields were encoded, produces a grant no conformant UE
 % could announce, and nothing notices while the SCI is never built.
-draws = rand(scen.stream, 1, scen.maxNumPerReserve);
-[slots, subch] = phy.rx.policy.resourcePickChained(candY, candX, survivor, draws, scen.maxNumPerReserve);
+draws  = rand(scen.stream, 1, scen.maxNumPerReserve);
+% The minimum time gap binds at selection too, not only at replacement: clause 5.22.1.1 states
+% it for "a selected sidelink grant" generally.
+minGap = phy.rx.policy.minResourceGapSlots(nLog, scen.slPsfchPeriod, scen.minTimeGapPsfch, ...
+    scen.policy.psfchProcSlots);
+[slots, subch] = phy.rx.policy.resourcePickChained(candY, candX, survivor, draws, ...
+    scen.maxNumPerReserve, minGap);
 
 u.grant     = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, true, counter);
 u.periodIdx = 0;

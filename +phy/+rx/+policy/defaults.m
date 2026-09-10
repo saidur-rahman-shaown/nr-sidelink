@@ -34,6 +34,14 @@ function p = defaults()
 %                    initial transmission. Default 1 (so two transmissions in total). With
 %                    HARQ feedback disabled, which is the broadcast case, blind repetition is
 %                    the only diversity available.
+%   .psfchProcSlots  integer, >=0 -- the UE-implementation half of TS 38.321 clause 5.22.1.1's
+%                    minimum time gap: "a time required for PSFCH reception and processing plus
+%                    sidelink retransmission preparation including multiplexing of necessary
+%                    physical channels and any TX-RX/RX-TX switching time". The clause's own
+%                    NOTE leaves it to implementation, so it is a knob rather than a constant.
+%                    Default 1 slot -- the smallest non-zero value, and therefore deliberately
+%                    OPTIMISTIC: a real UE needs longer, and a longer value pushes
+%                    retransmissions further out and lengthens the latency tail.
 %   .maxEscalations  positive integer -- safety bound handed to phy.ts38214.candidateSet for
 %                    its clause 8.1.4 step 7 loop. Default 10. Not a spec quantity: the loop
 %                    provably converges, and this turns a logic defect into an error rather
@@ -48,5 +56,6 @@ p = struct( ...
     'mcs',            7, ...
     'prsvpTxMs',      100, ...
     'numRetx',        1, ...
+    'psfchProcSlots', 1, ...
     'maxEscalations', 10);
 end

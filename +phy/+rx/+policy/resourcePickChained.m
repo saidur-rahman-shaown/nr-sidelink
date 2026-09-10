@@ -1,4 +1,4 @@
-function [slots, subch, N] = resourcePickChained(candY, candX, survivor, draws, maxReserve)
+function [slots, subch, N] = resourcePickChained(candY, candX, survivor, draws, maxReserve, minGapSlots)
 %resourcePickChained Draw one initial resource and its chained retransmissions from S_A.
 %Spec:   the DRAW is unspecified -- TS 38.321 clause 5.22.1.1 says only "randomly selects".
 %        The CONSTRAINT is not: TS 38.214 clause 8.1.5 and TS 38.212 clause 8.3.1.1 let TRIV
@@ -10,9 +10,22 @@ function [slots, subch, N] = resourcePickChained(candY, candX, survivor, draws, 
 %        draws         1 x maxReserve real in [0,1) -- one uniform draw per resource. Inputs,
 %                      never generated here, following +mac/'s rule so a grant replays exactly
 %        maxReserve    integer, 2 or 3 -- sl-MaxNumPerReserve
+%        minGapSlots   integer, >=0 -- the minimum separation TS 38.321 clause 5.22.1.1
+%                      requires between any two resources of one selected grant, from
+%                      phy.rx.policy.minResourceGapSlots. 0 when PSFCH is not configured
 %Outputs: slots  1 x N integer -- logical pool slots, ascending, slots(1) carrying the SCI
 %         subch  1 x N integer -- starting sub-channel of each
 %         N      integer, 1..maxReserve -- resources actually reserved
+%
+%TWO CONSTRAINTS, FROM DIFFERENT CLAUSES, BOTH BINDING
+%------------------------------------------------------
+%  * TRIV reach (upper bound): a chained resource must be within 1..31 logical slots of the
+%    anchor, or SCI-1A cannot announce it.
+%  * Minimum time gap (lower bound): when PSFCH is configured, consecutive resources must be
+%    far enough apart for the feedback on the earlier one to arrive and be acted on -- clause
+%    5.22.1.1's own definition, via phy.rx.policy.minResourceGapSlots.
+%The two squeeze the usable window from both ends, and with a long PSFCH period they can close
+%it entirely; that is a real outcome and comes back as a smaller N rather than an error.
 %
 %WHY THE CHAINED RESOURCES CANNOT BE DRAWN INDEPENDENTLY
 %--------------------------------------------------------
@@ -41,6 +54,9 @@ end
 if numel(draws) < maxReserve
     error('policy:resourcePickChained:tooFewDraws', 'resourcePickChained: need %d draws, got %d', maxReserve, numel(draws));
 end
+if ~(minGapSlots >= 0 && mod(minGapSlots, 1) == 0)
+    error('policy:resourcePickChained:badGap', 'resourcePickChained: minGapSlots must be a nonnegative integer, got %s', num2str(minGapSlots));
+end
 
 % ---- the anchor: the resource that carries the SCI -------------------------
 [anchorSlot, anchorSubch] = phy.rx.policy.resourcePick(candY, candX, survivor, draws(1));
@@ -56,9 +72,10 @@ for r = 2:maxReserve
     else
         gapMax = t2Max;
     end
-    % Strictly after the previous resource and within reach of the ANCHOR: clause 8.1.5's
-    % offsets are all measured from the SCI-carrying resource, not from each other.
-    reachable = survivor & (candY > slots(end)) & (candY <= anchorSlot + gapMax);
+    % At least minGapSlots after the previous resource, and within reach of the ANCHOR:
+    % clause 8.1.5's offsets are all measured from the SCI-carrying resource, not from each
+    % other, while the minimum gap is between CONSECUTIVE resources.
+    reachable = survivor & (candY >= slots(end) + max(1, minGapSlots)) & (candY <= anchorSlot + gapMax);
     if ~any(reachable)
         break;                       % nothing in reach: reserve fewer resources, do not fail
     end

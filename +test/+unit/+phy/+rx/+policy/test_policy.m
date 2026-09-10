@@ -218,6 +218,59 @@ assert(reqChain.T2 == 50 && reqChain.n == nTrig, 'chain: T2 must be the logical 
 [cy, ~, ~, Mt] = phy.ts38214.candidateSet(reqChain, 10, 100, mu, db, repmat(-110, 1, 64), 0.2, [100], 20, 100000, pol.maxEscalations);
 assert(Mt > 0 && all(cy >= nTrig + reqChain.T1) && all(cy <= nTrig + reqChain.T2), 'chain: candidates must lie in the logical window');
 
+%% ---- minResourceGapSlots: clause 5.22.1.1's two terms --------------------
+% Term 1 is the wait to the PSFCH occasion that will carry this resource's feedback; term 2 is
+% the UE-implementation processing time. With PSFCH disabled the clause's condition ("in case
+% that PSFCH is configured") is not met at all and the gap is zero.
+assert(phy.rx.policy.minResourceGapSlots(0, 0, 2, 1) == 0, 'no PSFCH configured means no minimum gap');
+assert(phy.rx.policy.minResourceGapSlots(0, 1, 2, 1) == 3, 'period 1 from slot 0: 2-slot wait + 1 prep = 3');
+assert(phy.rx.policy.minResourceGapSlots(0, 4, 2, 1) == 5, 'period 4 from slot 0: the occasion is at slot 4, so 4 + 1 = 5');
+% The anchor-dependence is the whole reason this is computed rather than read off
+% sl-MinTimeGapPSFCH: a PSFCH occasion falls only every sl-PSFCH-Period slots.
+assert(phy.rx.policy.minResourceGapSlots(1, 4, 2, 1) == 4, 'period 4 from slot 1: the occasion is still at slot 4, so 3 + 1 = 4');
+assert(phy.rx.policy.minResourceGapSlots(0, 4, 2, 1) ~= phy.rx.policy.minResourceGapSlots(1, 4, 2, 1), ...
+    'the gap must depend on where in the PSFCH period the anchor lands, or minTimeGapPSFCH alone would do');
+% The processing term is additive and is a knob, per the clause's own NOTE.
+assert(phy.rx.policy.minResourceGapSlots(0, 1, 2, 5) - phy.rx.policy.minResourceGapSlots(0, 1, 2, 1) == 4, ...
+    'the UE-implementation term must be additive');
+mustError(@() phy.rx.policy.minResourceGapSlots(0, 3, 2, 1), 'policy:minResourceGapSlots:badPeriod', 'a period outside {0,1,2,4}');
+
+%% ---- resourcePickChained honours BOTH bounds ----------------------------
+% TRIV reach is the upper bound, the minimum time gap the lower. A synthetic S_A one resource
+% per slot makes the arithmetic checkable by hand.
+cY = 0:200; cX = zeros(1, 201); sv = true(1, 201);
+[sl, ~, N] = phy.rx.policy.resourcePickChained(cY, cX, sv, [0 0 0], 2, 0);
+assert(N == 2 && diff(sl) >= 1, 'with no gap constraint the chained resource may be adjacent');
+[sl, ~, N] = phy.rx.policy.resourcePickChained(cY, cX, sv, [0 0 0], 2, 10);
+assert(N == 2 && diff(sl) >= 10, 'the chained resource must respect the minimum gap, got %s', mat2str(sl));
+[~, ~, N2] = phy.rx.policy.resourcePickChained(cY, cX, sv, [0 0 0], 2, 200);
+assert(N2 == 1, 'a gap larger than TRIV''s reach must degrade N to 1, not raise; got N=%d', N2);
+% Upper bound still holds with a gap configured.
+for d = [0 0.3 0.7 0.99]
+    [sl, ~, N] = phy.rx.policy.resourcePickChained(cY, cX, sv, [d d d], 2, 5);
+    if N == 2
+        assert(diff(sl) >= 5 && diff(sl) <= 31, 'both bounds must hold together, got gap %d', diff(sl));
+    end
+end
+
+%% ---- resourceReplace: clause 5.22.1.2a's four qualifiers ----------------
+% Kept resource at slot 100. A replacement must be >= minGap away from it and leave the whole
+% set inside TRIV's span.
+[ns, ~, found] = phy.rx.policy.resourceReplace(cY, cX, sv, 100, 10, 2, 0.0);
+assert(found && abs(ns - 100) >= 10, 'the replacement must respect the minimum gap from the kept resource, got %d', ns);
+assert(abs(ns - 100) <= 31, 'the post-swap set must stay inside TRIV''s span, got span %d', abs(ns - 100));
+% Every draw must satisfy both, not just the first.
+for d = 0:0.05:0.95
+    [ns, ~, f] = phy.rx.policy.resourceReplace(cY, cX, sv, 100, 10, 2, d);
+    assert(f && abs(ns - 100) >= 10 && abs(ns - 100) <= 31, 'draw %.2f gave slot %d, outside [10,31] of the kept resource', d, ns);
+end
+% NOTE 2: no candidate is a normal outcome reported as a flag, not an error.
+[~, ~, none] = phy.rx.policy.resourceReplace(cY, cX, false(1, 201), 100, 10, 2, 0.5);
+assert(~none, 'an empty S_A must report found = false');
+[~, ~, none2] = phy.rx.policy.resourceReplace(cY, cX, sv, 100, 100, 2, 0.5);
+assert(~none2, 'a minimum gap wider than TRIV''s span leaves nothing legal, and must report it rather than raise');
+mustError(@() phy.rx.policy.resourceReplace(cY, cX, sv, [10 50 90], 1, 2, 0.5), 'policy:resourceReplace:tooManyResources', 'replacing into more resources than sl-MaxNumPerReserve');
+
 fprintf('test_policy: all assertions passed.\n');
 end
 

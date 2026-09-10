@@ -39,6 +39,7 @@ what the test now asserts.
 | `slLcpBucket` / `slLcp` | 5.22.1.4.1 | per-destination, per-logical-channel prioritisation |
 | `harqInit` / `harqNewTransmission` / `harqRetransmission` / `harqOnFeedback` / `harqFlush` | 5.22.1.3.1, .1a, .3.3 | process management, RV sequence, feedback, DTX-based RLF |
 | `reevaluation` | 5.22.1.2a | re-check reserved-but-unsignalled resources against the current `S_A` |
+| `grantReplaceResource` | 5.22.1.2a | the clause's "remove ... replace" pair, in place, keeping the grant's size |
 | `preemption` | 5.22.1.2a + 38.214 §8.1.4 | higher-priority overlapping reservation above the RSRP threshold |
 
 Built in the documented order. The plan of record listed 8 modules; the tree has more files
@@ -84,6 +85,56 @@ a product and is off by orders of magnitude. The correct interval is
 `[5 × ceil(100 / max(20, P_rsvp_TX)), 15 × ceil(100 / max(20, P_rsvp_TX))]`, re-read from
 `Documentations/38321-gm0.pdf` directly. Same class of failure as the `N_symb^sh` term
 `+phy/+ts38214/CLAUDE.md` records. **Read the PDF for anything mathematical in this spec.**
+
+## Clause 5.22.1.2a says REPLACE, not clear — and it is specific about the replacement
+The three bullets, quoted:
+
+> `2>` remove the resource(s) from the selected sidelink grant associated to the Sidelink process;
+> `2>` randomly select the time and frequency resource from the resources indicated by the
+> physical layer … **for either the removed resource or the dropped resource**, according to the
+> amount of selected frequency resources, the selected number of HARQ retransmissions and the
+> remaining PDB … by ensuring the **minimum time gap** between any two selected resources … in
+> case that PSFCH is configured …, and that a resource **can be indicated by the time resource
+> assignment of an SCI** for a retransmission according to clause 8.3.1.1 of TS 38.212;
+> `2>` replace the removed or dropped resource(s) by the selected resource(s) …
+
+So only the flagged resource goes; the rest of the grant survives. `grantReplaceResource` is
+the remove-and-replace pair, `phy.rx.policy.resourceReplace` is the "randomly select" with its
+four qualifiers applied. The harness first cleared the whole grant instead — conservative, but
+it discards good resources with the bad, costs more reselections than a conformant UE performs,
+and inflates the access delay each of those adds.
+
+**`grantReplaceResource` re-sorts and carries `txOppUsed` with it.** A replacement can land
+earlier than the resource it replaced, and `grantSelect` fixes the ordering "index 1 is the
+initial transmission opportunity". Leaving the array unsorted silently makes resource 1 stop
+being the anchor, which the TRIV encoding and the signalled/not-signalled partition both read.
+
+**NOTE 2 makes "no candidate" a normal outcome**, not an error: "If retransmission resource(s)
+cannot be selected by ensuring that the resource(s) can be indicated by the time resource
+assignment of a prior SCI, how to select … is left for UE implementation". `resourceReplace`
+returns a `found` flag rather than raising.
+
+## The minimum time gap is defined in clause 5.22.1.1, and it binds at selection too
+> For a selected sidelink grant, the minimum time gap between any two selected resources
+> comprises: — a time gap between the end of the last symbol of a PSSCH transmission of the
+> first resource and the start of the first symbol of the corresponding PSFCH reception
+> determined by **sl-MinTimeGapPSFCH and sl-PSFCH-Period** …; and — a time required for PSFCH
+> reception and processing plus sidelink retransmission preparation …
+
+Two terms: the first fully determined, the second left to implementation by the clause's own
+NOTE. `phy.rx.policy.minResourceGapSlots` computes the first from `phy.ts38213.psfchTiming` and
+takes the second as a policy knob.
+
+**Computing the first term from `sl-MinTimeGapPSFCH` alone is wrong.** A PSFCH occasion falls
+only every `sl-PSFCH-Period` slots, so the true wait depends on where in the period the PSSCH
+lands: at period 4 the gap is 3 slots from anchor slot 0 but 4 from anchor slot 1, and using the
+configured minimum would place a retransmission before the feedback for it exists.
+
+**It applies to initial selection, not only to replacement** — the clause states it for "a
+selected sidelink grant" generally, and clause 5.22.1.1's own selection text carries the same
+"by ensuring the minimum time gap" phrase. A simulator that skips it reports the HARQ gain of
+feedback while actually running open loop, and the error flatters everything at once: the two
+transmissions sit closer together, so the packet completes sooner and the latency improves too.
 
 ## Known traps
 - **`C_resel` is TEN times the counter.** The multiplier appears explicitly in `cresel.m`, never
@@ -174,9 +225,10 @@ a product and is off by orders of magnitude. The correct interval is
 - **Segmentation.** `slLcp` allocates byte budgets per logical channel; turning a budget into RLC
   SDUs and segments is `+rlc/`'s job, and clause 5.22.1.4.1.3's segmentation rules operate on RLC
   SDU boundaries.
-- **The `+phy/+rx/+policy/` decisions** these modules defer to: which resource to draw from `S_A`,
-  which replacement to pick after re-evaluation or pre-emption, whether to segment, whether to
-  fall back to a single MAC PDU when the PDB cannot be met.
+- **The `+phy/+rx/+policy/` decisions** these modules defer to: whether to segment, and whether
+  to fall back to a single MAC PDU when the PDB cannot be met. *(Which resource to draw from
+  `S_A` and which replacement to pick after re-evaluation or pre-emption are now built —
+  `phy.rx.policy.resourcePick`, `resourcePickChained` and `resourceReplace`.)*
 
 ## Tests
 `+test/+unit/+mac/test_macSidelink.m`, run by `+test/runMacTests.m` (and `+test/runAllTests.m`,
@@ -206,6 +258,19 @@ got its own rather than being smuggled into it).
 - `reevaluation` / `preemption`: the `signalledBySci` complement in both directions, the
   `m - T_3` due point, and pre-emption's strict priority comparison, threshold test, escalated
   offset, frequency-overlap requirement and chained-resource case.
+
+## An over-constraint the wiring caught, of the same class as the NDI one
+The system-level test asserted that clearing `sl-PreemptionEnable` leaves the re-evaluation
+count unchanged, on the reasoning that the field gates pre-emption only. The *reasoning* is
+right and the *assertion* was not: a pre-emption that fires **replaces a resource**, which
+changes that UE's grant and everything downstream of it, so the two runs diverge and their
+re-evaluation counts legitimately differ (4 against 5 on one seed). The spec says the gate does
+not apply to re-evaluation; it does not say the two runs stay identical. The test now asserts
+re-evaluation still fires, not that it fires the same number of times.
+
+Third instance of the same failure mode in this package's history, after the NDI initial value
+and the `SBj > 0` scoping: a claim stronger than the clause's, which passes until the case that
+separates them.
 
 ## `pending-human` per +test/CLAUDE.md level 2
 Two points the verifier flagged as inference rather than quotation, both in the counter
@@ -237,6 +302,18 @@ lifecycle:
   identifier comes from TS 23.287, for which there is no local PDF (`+cfg/specVersions.json` still
   lists TS23287 as an unverified placeholder). The arithmetic is self-consistent — 16+8 and 8+16
   both reach 24 — which corroborates it, but it is not extracted from a document in this repo.
+
+## Wired into the system-level simulator
+Every module in the table above is now called from `+harness/+sls/slotStep`, except
+`slLcpBucket` (the baseline scenario configures `sl-PrioritisedBitRate` = 0, so the buckets
+never refill and LCP's first pass allocates nothing — a mixed-QoS scenario is what would
+exercise it) and `harqFlush` (clause 5.22.1.3.1's fourth condition, the initial-transmission
+grant that produced no MAC PDU; the loop returns early instead of building an empty one).
+
+`+harness/CLAUDE.md` records two ordering bugs that wiring 5.22.1.2a exposed, both with the same
+quiet symptom — transmissions per delivery collapsing to 1.00 while delivery still mostly
+worked: the check must run at **exactly** `m - T_3`, and **only** the resources due at that
+instant may be passed in.
 
 ## Gate
 A periodic generator produces the correct reservation pattern. Cresel decrements correctly.

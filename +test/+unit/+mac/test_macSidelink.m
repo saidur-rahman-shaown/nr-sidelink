@@ -435,6 +435,46 @@ catch e
     assert(strcmp(e.identifier, 'mac:preemption:badPreemptionEnable'), 'preemption: wrong error for a bad sl-PreemptionEnable label');
 end
 
+%% grantReplaceResource -- clause 5.22.1.2a's "remove ... replace" pair
+% The grant keeps its SIZE: the clause replaces, it does not drop. A grant that lost a resource
+% without gaining one would decay to a single transmission over several checks, which looks
+% like a working grant and reads as a reliability loss with no cause.
+gR = mac.grantInit();
+gR = mac.grantSelect(gR, [100 120], [0 2], 3, 100, true, 5);
+gR2 = mac.grantReplaceResource(gR, 2, 130, 4);
+assert(numel(gR2.txOppSlot) == 2, 'the grant must keep its size, got %d resources', numel(gR2.txOppSlot));
+assert(isequal(gR2.txOppSlot, [100 130]) && isequal(gR2.txOppStartSubch, [0 4]), 'the replacement must land in place, got %s / %s', mat2str(gR2.txOppSlot), mat2str(gR2.txOppStartSubch));
+assert(~gR2.txOppUsed(2), 'a replacement resource has not been transmitted on');
+
+% Re-sorting is not cosmetic. grantSelect fixes "index 1 is the initial transmission
+% opportunity", and grantOnTransmission, the TRIV encoding and clause 5.22.1.2a's
+% signalled/not-signalled partition all read that ordering. A replacement can land EARLIER than
+% the resource it replaced, and txOppUsed must travel with its own resource, not with its index.
+gU = mac.grantOnTransmission(gR, 1);            % slot 100 used
+gU2 = mac.grantReplaceResource(gU, 2, 90, 4);   % replacement lands before it
+assert(isequal(gU2.txOppSlot, [90 100]), 'resources must be re-sorted ascending, got %s', mat2str(gU2.txOppSlot));
+assert(isequal(gU2.txOppUsed, [false true]), 'the used flag must follow its resource through the sort, got %s', mat2str(gU2.txOppUsed));
+assert(isequal(gU2.txOppStartSubch, [4 0]), 'the sub-channels must be permuted with the slots, got %s', mat2str(gU2.txOppStartSubch));
+
+try
+    mac.grantReplaceResource(gR, 1, 120, 0);
+    error('test:noError', 'expected a duplicate-slot rejection');
+catch e
+    assert(strcmp(e.identifier, 'mac:grantReplaceResource:duplicateSlot'), 'two resources of one grant cannot share a slot; got %s', e.identifier);
+end
+try
+    mac.grantReplaceResource(gR, 3, 140, 0);
+    error('test:noError', 'expected an out-of-range index rejection');
+catch e
+    assert(strcmp(e.identifier, 'mac:grantReplaceResource:badIndex'), 'got %s', e.identifier);
+end
+try
+    mac.grantReplaceResource(mac.grantInit(), 1, 100, 0);
+    error('test:noError', 'expected a no-grant rejection');
+catch e
+    assert(strcmp(e.identifier, 'mac:grantReplaceResource:noGrant'), 'got %s', e.identifier);
+end
+
 fprintf('test_macSidelink: PASS\n');
 end
 
