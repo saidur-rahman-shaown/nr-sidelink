@@ -37,5 +37,35 @@ the expected shape. Round trip passes for every SCI format with a real receiver 
   catches the rest.
 
 ## Built so far
-`+policy/` only — see `+phy/+rx/+policy/CLAUDE.md`. `+sync/`, `+ce/`, `+eq/` and `+det/` are
-still empty; B5 has not started.
+`+policy/` (see its own CLAUDE.md), plus `+ce/` and `+eq/`. `+sync/` and `+det/` are still
+empty.
+
+| Module | What it does |
+|---|---|
+| `+ce/gridExtract` | pull a channel's data and DM-RS REs out of a received grid, in mapping order |
+| `+ce/dmrsEstimate` | least-squares channel estimate at the pilots, interpolated to the data REs, plus a noise-variance estimate from the pilot residual |
+| `+eq/zfEqualise` | zero forcing, returning **per-RE** post-equalisation noise variance |
+
+### The receiver is not given the channel or the noise
+Both are estimated. A perfect-CSI receiver produces BLER curves 1 to 2 dB optimistic and every
+system-level result built on them inherits that bias with nothing anywhere to reveal it — and
+since the whole point of `+harness/+lls/` is to replace an invented curve with a measured one,
+measuring it against a receiver that knows the answer would defeat the exercise. The measured
+cost is about 2 dB against an idealised loopback at the same operating point.
+
+### Per-RE noise variance is the output that matters
+Zero forcing divides the noise by the channel, so an RE in a fade comes out with its noise
+multiplied by `1/|h|²`. Returning one scalar for the allocation tells the demapper a deeply
+faded RE is as reliable as a strong one, and the LLR magnitudes come out confidently wrong
+exactly where the errors are. Over AWGN the distinction vanishes (|h| is flat), which is why it
+survives a flat-channel test and only costs dB once a frequency-selective channel arrives.
+
+MMSE is the obvious next equaliser — it does not amplify noise in a fade at all. Zero forcing
+came first because it has no tuning and no dependence on the noise estimate, so a bug in the
+noise estimate cannot hide inside it.
+
+### `+sync/` and `+det/` are still empty, deliberately
+`phy.lib.ofdmDemod` assumes the waveform is already time-aligned and frequency-corrected, and
+says so. Acquisition is `+sync/`'s job; a demodulator that silently searched for its own timing
+would hide every synchronisation failure inside a channel-estimation error. The system-level
+path models sync as ideal, per `BUILD.md`'s explicit deferral.

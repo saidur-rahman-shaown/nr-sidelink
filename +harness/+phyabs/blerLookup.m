@@ -1,40 +1,41 @@
 function bler = blerLookup(mcs, sinrDb, txAttempt, channelModel, speedKmh)
-%blerLookup Block error rate for one transport block. A PLACEHOLDER curve, keyed for the real one.
+%blerLookup Block error rate for one transport block, from the MEASURED link-level table.
 %Spec:   none -- PHY abstraction, not a 3GPP quantity.
 %Inputs: mcs           integer, 0..31 -- I_MCS
-%        sinrDb        real array, dB -- post-equalisation SINR
+%        sinrDb        real array, dB -- post-equalisation SINR. NaN where the link is unheard
 %        txAttempt     integer, >=1 -- 1 for the initial transmission, 2 for the first
-%                      retransmission, and so on. Present because chase combining makes the
-%                      n-th attempt's effective SINR higher than its instantaneous one
-%        channelModel  char -- 'awgn', or a TDL/CDL label once those exist
-%        speedKmh      real, >=0 -- relative speed; sets Doppler and therefore channel
-%                      estimation loss
+%                      retransmission, and so on. The table's retransmission dimension carries
+%                      real soft-combining gain measured with a soft buffer, not an assumed
+%                      per-attempt dB bonus
+%        channelModel  char -- must match what the table was measured under
+%        speedKmh      real, >=0 -- likewise
 %Outputs: bler  real array in [0,1], same size as sinrDb
 %
-%THE KEY STRUCTURE IS THE POINT OF THIS FUNCTION, NOT THE CURVE
-%---------------------------------------------------------------
-%+harness/CLAUDE.md is emphatic: "Design the table's key structure at B5, before generating
-%anything ... Adding a dimension later means regenerating every curve, which is the most
-%expensive avoidable mistake in this phase." So the interface takes all five keys NOW --
-%mcs, SINR, retransmission index, channel model and speed -- even though the placeholder body
-%below reads only the first three. When the link-level simulator produces real curves in
-%Phase 3, this signature does not change and no caller is touched.
-%
-%THE PLACEHOLDER, STATED PLAINLY
+%THIS IS NO LONGER A PLACEHOLDER
 %--------------------------------
-%A logistic in SINR whose midpoint rises with MCS and whose slope is fixed. It has the right
-%shape (monotone, saturating at both ends) and roughly the right spacing between MCS levels,
-%and it is otherwise invented. It is NOT calibrated against anything.
-%  - Comparisons between policies on the same curve are meaningful.
-%  - Absolute BLER, throughput and PRR-versus-distance numbers are NOT, until Phase 3 replaces
-%    this with curves measured from +phy/+chan/ and +phy/+rx/.
-%Chase combining is modelled as a 3 dB effective SINR gain per prior attempt, which is the
-%ideal-combining bound and therefore optimistic.
+%Until Phase 3 this function was a logistic in SINR with an invented midpoint and slope, and
+%every header that consumed it said so. It now reads harness.phyabs.blerTable -- BLER measured
+%by +harness/+lls/ over the real transmit chains, a real OFDM waveform, DM-RS channel
+%estimation and zero-forcing equalisation, with soft combining across redundancy versions.
 %
-%Out-of-range behaviour is stated rather than left to an extrapolation: the logistic saturates,
-%so SINR far below the midpoint gives BLER 1 and far above gives 0. A real table must declare
-%the same thing explicitly -- silently extrapolating off the end of a BLER table is how an SLS
-%produces confident nonsense.
+%The SIGNATURE HAS NOT CHANGED, which was the point of fixing the key structure in Phase 0
+%before any curve existed: no caller was touched to make this switch. +harness/CLAUDE.md's
+%warning -- "Adding a dimension later means regenerating every curve, which is the most
+%expensive avoidable mistake in this phase" -- is the reason all five keys were taken from the
+%start even while three were ignored.
+%
+%The interpolation rule, the out-of-range behaviour and the reason for each are stated in
+%harness.phyabs.blerInterp. In short: linear in SNR, nearest in MCS, clamped at every edge,
+%never extrapolated.
+%
+%WHAT IS STILL AN APPROXIMATION
+%-------------------------------
+%The table is measured over AWGN at zero speed and one allocation width, so those keys are
+%checked rather than interpolated: an unknown channel model or a nonzero speed is REJECTED, not
+%silently answered with the AWGN curve. A fading table is the next measurement, not a
+%reinterpretation of this one.
+
+tbl = harness.phyabs.blerTable();
 
 if ~(mcs >= 0 && mcs <= 31 && mod(mcs, 1) == 0)
     error('phyabs:blerLookup:badMcs', 'blerLookup: mcs must be an integer in 0..31, got %s', num2str(mcs));
@@ -48,19 +49,15 @@ end
 if ~(speedKmh >= 0)
     error('phyabs:blerLookup:badSpeed', 'blerLookup: speedKmh must be >= 0, got %s', num2str(speedKmh));
 end
-if ~strcmp(channelModel, 'awgn')
-    error('phyabs:blerLookup:unknownModel', 'blerLookup: only ''awgn'' exists so far, got ''%s'' -- a real table must reject an unknown key rather than substitute one', channelModel);
+% A key the table was not measured under is an error, never a substitution. Answering an
+% unknown key with the nearest measured one is exactly the silent extrapolation this whole
+% module is written to avoid.
+if ~strcmp(channelModel, tbl.meta.channelModel)
+    error('phyabs:blerLookup:unknownModel', 'blerLookup: the table was measured over ''%s'', not ''%s'' -- measure a new table rather than reading this one off-key', tbl.meta.channelModel, channelModel);
+end
+if speedKmh ~= tbl.meta.speedKmh
+    error('phyabs:blerLookup:unknownSpeed', 'blerLookup: the table was measured at %g km/h, not %g', tbl.meta.speedKmh, speedKmh);
 end
 
-% Midpoint of the waterfall, dB. -4 dB at MCS 0 rising ~0.9 dB per MCS index: the shape of a
-% real family of curves, the numbers invented.
-mcs0MidpointDb   = -4;
-midpointPerMcsDb = 0.9;
-slopePerDb       = 1.6;                 % logistic steepness; a real waterfall is steeper
-combiningGainDb  = 3;                   % per prior attempt, the ideal chase-combining bound
-
-midpoint  = mcs0MidpointDb + midpointPerMcsDb * mcs;
-effective = sinrDb + combiningGainDb * (txAttempt - 1);
-bler      = 1 ./ (1 + exp(slopePerDb * (effective - midpoint)));
-bler(isnan(sinrDb)) = 1;                % a link that cannot be heard never decodes
+bler = harness.phyabs.blerInterp(tbl, 'pssch', mcs, sinrDb, txAttempt);
 end
