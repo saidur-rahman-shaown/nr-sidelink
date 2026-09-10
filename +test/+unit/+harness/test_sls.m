@@ -286,5 +286,49 @@ headroomDb = 3 * scEsc.policy.maxEscalations;
 assert(headroomDb >= (scEsc.pCmaxDbm - closest) - min(scEsc.pool.thresholdListDbm), ...
     'the bound must give enough headroom to clear the strongest sensible RSRP');
 
+%% ---- congestion control: CBR, CR and clause 8.1.6 -----------------------
+% CBR must track load. If it does not, the measurement is not reading the channel -- most
+% likely because unmonitored (half-duplex) slots are being scored as idle, which makes a busy
+% channel look emptier the busier it gets.
+cbrByLoad = zeros(1, 3);
+loads = [10 30 60];
+for j = 1:3
+    kj = harness.sls.run(loads(j), 1200, 9);
+    cbrByLoad(j) = kj.cbrMean;
+end
+assert(all(diff(cbrByLoad) > 0), 'CBR must rise with UE count, got %s', mat2str(cbrByLoad, 3));
+assert(all(cbrByLoad > 0 & cbrByLoad < 1), 'CBR must be a ratio in (0,1), got %s', mat2str(cbrByLoad, 3));
+
+% The CR limit is normative and the response is not: congestionControlCheck reports,
+% phy.rx.policy.congestionDrop decides. Tightening the limit must throttle, monotonically.
+drops = zeros(1, 3); goodput = zeros(1, 3);
+limits = [1.0 0.001 0.0005];
+for j = 1:3
+    sj = harness.sls.scenarioInit(30, 9);
+    sj.pool.crLimitByLevel = repmat(limits(j), 1, numel(sj.pool.crLimitByLevel));
+    kj = harness.sls.runScenario(sj, 1500);
+    drops(j) = kj.nCongestionDrop;
+    goodput(j) = kj.goodputKbps;
+end
+assert(drops(1) == 0, 'an unconstrained CR limit must drop nothing, got %d', drops(1));
+assert(all(diff(drops) > 0), 'a tighter CR limit must drop more, got %s', mat2str(drops));
+assert(all(diff(goodput) < 0), 'throttling must cost goodput, got %s', mat2str(goodput, 4));
+
+% Congestion drops are counted separately from losses: a packet the UE chose not to send is a
+% different thing from one the channel destroyed, and they are indistinguishable in PRR alone.
+assert(isfield(kj, 'nCongestionDrop') && isfield(kj, 'cbrMean'), 'the KPI must report congestion separately');
+
+%% ---- LCP buckets are no longer inert ------------------------------------
+% With sl-PrioritisedBitRate at 0 the buckets never rise above zero, LCP's first (SBj-limited)
+% pass allocates nothing, and every byte is served by the second pass. The totals still come
+% out right, so nothing looks wrong -- the prioritised-bit-rate mechanism is simply not
+% running.
+[~, ueB, scB] = harness.sls.run(20, 2000, 9);
+buckets = arrayfun(@(x) x.lch.Sbj, ueB);
+assert(scB.traffic.pbrBytesPerSec > 0, 'the scenario must configure a non-zero sl-PrioritisedBitRate');
+assert(any(abs(buckets) > 1e-9), 'the token buckets must be refilling, got all zero');
+cap = scB.traffic.pbrBytesPerSec * scB.traffic.bsdSeconds;
+assert(all(buckets <= cap + 1e-9), 'clause 5.22.1.4.1.1 caps Bj at sl-PrioritisedBitRate x sl-BucketSizeDuration = %.1f, got max %.1f', cap, max(buckets));
+
 fprintf('test_sls: all assertions passed.\n');
 end

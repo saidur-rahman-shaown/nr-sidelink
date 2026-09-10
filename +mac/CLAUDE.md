@@ -316,11 +316,16 @@ lifecycle:
   both reach 24 — which corroborates it, but it is not extracted from a document in this repo.
 
 ## Wired into the system-level simulator
-Every module in the table above is now called from `+harness/+sls/slotStep`, except
-`slLcpBucket` (the baseline scenario configures `sl-PrioritisedBitRate` = 0, so the buckets
-never refill and LCP's first pass allocates nothing — a mixed-QoS scenario is what would
-exercise it) and `harqFlush` (clause 5.22.1.3.1's fourth condition, the initial-transmission
-grant that produced no MAC PDU; the loop returns early instead of building an empty one).
+**Every module in the table above is now called from `+harness/+sls/slotStep`.** The last two
+to be wired were:
+- **`slLcpBucket`.** The scenario had `sl-PrioritisedBitRate` = 0, which makes the buckets
+  inert: `SBj` never rises above zero, LCP's first (`SBj`-limited) pass allocates nothing, and
+  every byte is served by the second pass. The totals still come out right, so nothing looks
+  wrong — the prioritised-bit-rate mechanism simply is not running. Called once per slot now.
+- **`harqFlush`.** An initial-transmission opportunity arriving with nothing to send flushes the
+  buffer. Without it the *previous* MAC PDU survives and is retransmitted at this period's
+  retransmission opportunity — a stale TB under a fresh grant, delivering a duplicate whose
+  packets were already resolved.
 
 `+harness/CLAUDE.md` records two ordering bugs that wiring 5.22.1.2a exposed, both with the same
 quiet symptom — transmissions per delivery collapsing to 1.00 while delivery still mostly

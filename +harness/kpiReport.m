@@ -1,4 +1,4 @@
-function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxDistM, rxOk, nRlf, nReeval, nPreempt)
+function kpi = kpiReport(resolved, nGenerated, nSlots, scen, nTransmissions, rxDistM, rxOk, nRlf, nReeval, nPreempt, nCongDrop, cbrByUe)
 %kpiReport Latency, reliability and throughput from resolved packet contexts.
 %Spec:   none -- KPI definitions. They are the reason the tree exists, so each one states what
 %        it counts and, where it matters, what it deliberately does not.
@@ -108,6 +108,13 @@ kpi.nRlf    = nRlf;
 % for both in a quiet pool is expected; zero in a congested one means the checks are not wired.
 kpi.nReeval  = nReeval;
 kpi.nPreempt = nPreempt;
+% Congestion drops are counted SEPARATELY and never folded into the loss count. A packet the UE
+% chose not to send is a different thing from one the channel destroyed, and the two are
+% indistinguishable in a PRR figure alone -- so a congestion-control policy that throttles hard
+% would otherwise read as a bad radio link.
+kpi.nCongestionDrop = nCongDrop;
+kpi.cbrMean = mean(cbrByUe);
+kpi.cbrMax  = max(cbrByUe);
 end
 
 function v = pct(x, p)

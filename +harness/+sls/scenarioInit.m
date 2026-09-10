@@ -71,7 +71,12 @@ scen.pool = struct( ...
     'T2minRaw',         20, ...                    % sl-SelectionWindow
     'slProbResourceKeep', 0.4, ...
     'slReselectAfter',  Inf, ...
-    'slPreemptionEnable', 'enabled');       % sl-PreemptionEnable-r16; '' disables it entirely                      % not configured: never fires on unused periods
+    'slPreemptionEnable', 'enabled', ...
+    'threshSRssiCbrDbm', -94, ...           % sl-Thres-RSSI-CBR, pre-resolved to dBm
+    'timeWindowSizeCBR', 'ms100', ...       % sl-TimeWindowSizeCBR-r16
+    'timeWindowSizeCR',  'ms1000', ...      % sl-TimeWindowSizeCR-r16
+    'cbrRangeUpperBounds', [0.2 0.4 0.6 0.8 1.0], ...  % one SL-CBR-LevelsConfig, as ratios
+    'crLimitByLevel', [1.0 0.6 0.3 0.12 0.05]);        % sl-CR-Limit per CBR level, pre-resolved       % sl-PreemptionEnable-r16; '' disables it entirely                      % not configured: never fires on unused periods
 
 % ---- traffic ---------------------------------------------------------------
 pqi = 55;                                % CAM-like periodic awareness, the pqiTable default row
@@ -83,7 +88,9 @@ scen.traffic = struct( ...
     'pdbMs',       row.PDB_ms, ...
     'periodSlots', 100 * scen.slotsPerMs, ...      % 100 ms CAM period
     'sizeBytes',   300, ...
-    'lcid',        4);
+    'lcid',        4, ...
+    'pbrBytesPerSec', 300 * 10, ...      % sl-PrioritisedBitRate: one 300-byte CAM per 100 ms
+    'bsdSeconds',     0.1);              % sl-BucketSizeDuration, so the bucket holds one CAM
 
 % ---- transport block size, from the real clause 8.1.3.2 arithmetic ---------
 % L_subCH is DERIVED here, not taken from policy.defaults: the default is a documented stand-in
@@ -161,6 +168,17 @@ end
 scen.nUe      = nUe;
 scen.spacingM = 20;
 scen.posXY    = [(0:nUe - 1)' * scen.spacingM, zeros(nUe, 1)];
+
+% ---- congestion control windows (TS 38.215 clause 5.1.25 / 5.1.26) ---------
+% The window LENGTHS are normative; the CR window's split into past and future halves is not
+% (clause 5.1.26 NOTE 1: "determined by UE implementation"), so it comes from
+% phy.rx.policy.crWindowSplit. N is the measurement-to-action processing delay from
+% clause 8.1.6.
+scen.cbrWindowSlots = phy.ts38215.cbrWindowSlots(scen.pool.timeWindowSizeCBR, scen.mu);
+crTotal             = phy.ts38215.crWindowSlots(scen.pool.timeWindowSizeCR, scen.mu);
+[scen.crPastSlots, scen.crFutureSlots] = phy.rx.policy.crWindowSplit(crTotal);
+scen.crWindowTotal  = crTotal;
+scen.congestionProcSlots = phy.ts38214.procTimeCongestion(scen.mu, 1);
 
 % ---- the escalation bound, DERIVED rather than guessed ---------------------
 % Clause 8.1.4 step 7 raises every RSRP threshold by 3 dB and repeats until S_A reaches

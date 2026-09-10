@@ -1,4 +1,4 @@
-function [ue, scen, resolved, air, rxLog, nRlf, nReeval, nPreempt] = slotStep(ue, scen, nPhys)
+function [ue, scen, resolved, air, rxLog, nRlf, nReeval, nPreempt, nCongestionDrop] = slotStep(ue, scen, nPhys)
 %slotStep Advance the whole scenario by one slot.
 %Spec:   none itself; it sequences modules that each cite their own clause. The intra-slot
 %        ordering is +harness/CLAUDE.md's, with one documented reordering -- see below.
@@ -13,6 +13,7 @@ function [ue, scen, resolved, air, rxLog, nRlf, nReeval, nPreempt] = slotStep(ue
 %         nRlf      integer -- radio link failures indicated this slot (clause 5.22.1.3.3)
 %         nReeval   integer -- resources re-evaluation flagged for replacement this slot
 %         nPreempt  integer -- resources pre-emption flagged this slot
+%         nCongestionDrop  integer -- transmissions dropped by clause 8.1.6 congestion control
 %         rxLog fields, continued: one entry per (transmission, hearing receiver) PAIR. This is the raw material for PRR-versus-distance, which is
 %                   a per-LINK statistic and cannot be recovered from packet outcomes -- see
 %                   +harness/kpiReport
@@ -44,6 +45,7 @@ rxLog    = struct('distM', zeros(1, 0), 'ok', false(1, 0));
 nRlf     = 0;
 nReeval  = 0;
 nPreempt = 0;
+nCongestionDrop = 0;
 
 % ---- 1. TIMING ------------------------------------------------------------
 nLog = scen.logicalOfPhys(nPhys + 1);
@@ -63,7 +65,19 @@ for i = 1:nUe
     end
 end
 
-% ---- 3. EXPIRE: a spent budget is a LOSS, wherever the packet is ----------
+% ---- 3. BUCKETS: clause 5.22.1.4.1.1's token refill -----------------------
+% Bj is incremented by sl-PrioritisedBitRate x T before every LCP run, and capped at
+% sl-PrioritisedBitRate x sl-BucketSizeDuration. Leaving sl-PrioritisedBitRate at 0, as this
+% scenario first did, makes the buckets inert: SBj never rises above 0, so LCP's first
+% (SBj-limited) pass allocates nothing at all and every byte is served by the second pass. The
+% totals still come out right, so nothing looks wrong -- but the prioritised-bit-rate mechanism
+% that is the entire point of clause 5.22.1.4.1 is not being exercised.
+elapsedSeconds = 1 / (1000 * 2^scen.mu);      % one slot
+for i = 1:nUe
+    ue(i).lch.Sbj = mac.slLcpBucket(ue(i).lch.Sbj, ue(i).lch.pbr, ue(i).lch.bsd, elapsedSeconds);
+end
+
+% ---- 4. EXPIRE: a spent budget is a LOSS, wherever the packet is ----------
 % Both the queue AND the in-flight set. A packet dequeued into a transport block has left the
 % logical channel, so lchExpire can no longer see it -- and without the second loop it would
 % sit in flight forever if the block were never delivered, silently leaving the denominator of
@@ -86,7 +100,7 @@ for i = 1:nUe
     ue(i).inFlightProc = ue(i).inFlightProc(stillFlying);
 end
 
-% ---- 4. TX ----------------------------------------------------------------
+% ---- 5. TX ----------------------------------------------------------------
 airList = {};
 for i = 1:nUe
     % The reservation period must close BEFORE the transmission that opens the next one.
@@ -94,7 +108,8 @@ for i = 1:nUe
     % is how a counter decrementing at the wrong rate is caught -- so a period boundary
     % processed after the transmission raises on the first repeat of opportunity 1.
     [ue(i), scen] = periodPhase(ue(i), scen, nLog, periodLogical);
-    [ue(i), t, sent] = txPhase(ue(i), scen, nPhys, nLog, periodLogical);
+    [ue(i), t, sent, dropped] = txPhase(ue(i), scen, nPhys, nLog, periodLogical);
+    nCongestionDrop = nCongestionDrop + double(dropped);
     if sent
         assert(t.slotLogical == nLog, 'slotStep: a transmission must be in the slot being executed');
         airList{end + 1} = rf.toAir(sap.txReqValidate(t, scen.numSubchannel), i, ue(i).posXY); %#ok<AGROW>
@@ -106,11 +121,11 @@ else
     air = [airList{:}];
 end
 
-% ---- 5. CHANNEL: once for the slot, so interference is a slot property ----
+% ---- 6. CHANNEL: once for the slot, so interference is a slot property ----
 [sinrDb, rxPowerDbm, canHear, sinrPscchDb] = harness.chanmodel.slotSinr(air, scen.posXY, ...
     scen.radio, scen.numSubchannel, scen.pscchPrb, scen.subchSizeRb);
 
-% ---- 6. RX ----------------------------------------------------------------
+% ---- 7. RX ----------------------------------------------------------------
 isTx = false(1, nUe);
 for k = 1:numel(air)
     isTx(air(k).ueId) = true;
@@ -194,13 +209,45 @@ for i = 1:nUe
     end
 end
 
-% ---- 7. PSFCH: transmit the feedback due here, and apply what comes back --
+% ---- 8. MEASURE: SL RSSI per sub-channel, into the CBR window -------------
+% +harness/CLAUDE.md's ordering puts MEASURE after RX, and it matters: the CBR window is
+% [n-a, n-1], so slot n's measurement is written AFTER slot n's transmissions have been
+% evaluated and is read by slot n+1's transmit decision. Measuring before RX would put slot n
+% into its own window.
+%
+% phy.ts38215.slRssi takes a resource grid and belongs to the waveform path. Here the RSSI of
+% a sub-channel is the summed received power of every transmission overlapping it, plus noise
+% -- the same quantities slotSinr already computed, aggregated per sub-channel instead of per
+% link. A UE that transmitted measures nothing: those entries stay NaN, which phy.ts38215.cbr
+% reads as "not measured" rather than as "idle". Scoring an unmonitored slot as idle would
+% make a busy channel look emptier the busier it gets, since a UE transmits more when it has
+% more to send.
+subchBwHz  = scen.radio.bwHz / scen.numSubchannel;
+noiseSubMw = 10^(rf.noiseFloorDbm(subchBwHz, scen.radio.noiseFigureDb) / 10);
+row = mod(nPhys, scen.cbrWindowSlots) + 1;
+for i = 1:nUe
+    if isTx(i)
+        ue(i).rssiWindow(row, :) = NaN;
+        continue;
+    end
+    pwrMw = repmat(noiseSubMw, 1, scen.numSubchannel);
+    for k = 1:numel(air)
+        if ~canHear(k, i)
+            continue;
+        end
+        occupied = air(k).startSubch + (0:air(k).LsubCH - 1) + 1;
+        pwrMw(occupied) = pwrMw(occupied) + 10^(rxPowerDbm(k, i) / 10) / air(k).LsubCH;
+    end
+    ue(i).rssiWindow(row, :) = 10 * log10(pwrMw);
+end
+
+% ---- 9. PSFCH: transmit the feedback due here, and apply what comes back --
 if scen.isUnicast
     [ue, scen, nRlf, fbResolved] = psfchPhase(ue, scen, nLog, nPhys);
     resolved = [resolved fbResolved];
 end
 
-% ---- 8. MAC: re-evaluation and pre-emption, then the reselection check ----
+% ---- 10. MAC: re-evaluation and pre-emption, then the reselection check ----
 % Clause 5.22.1.2a's two checks run BEFORE clause 5.22.1.2's, because they are what can make
 % the grant unusable: a resource that fails either is cleared, and the reselection check then
 % sees "there is no selected sidelink grant" and reselects. Running them after would let a
@@ -238,6 +285,7 @@ function [u, scen, nReeval, nPreempt] = reevalPreemptPhase(u, scen, nLog, period
 
 nReeval  = 0;
 nPreempt = 0;
+nCongestionDrop = 0;
 if ~u.grant.hasGrant
     return;
 end
@@ -472,10 +520,14 @@ end
 end
 
 % =========================================================================
-function [u, t, sent] = txPhase(u, scen, nPhys, nLog, periodLogical)
+function [u, t, sent, dropped] = txPhase(u, scen, nPhys, nLog, periodLogical)
 %txPhase Emit this UE's transmission for slot nLog, if its grant has an opportunity here.
-t    = sap.txReqInit();
-sent = false;
+t       = sap.txReqInit();
+sent    = false;
+dropped = false;
+% The slot's own occupancy entry is cleared before anything can write it, so a stale value from
+% crWindowTotal slots ago cannot survive into this window.
+u.usedHistory(mod(nPhys, scen.crWindowTotal) + 1) = 0;
 if ~u.grant.hasGrant
     return;
 end
@@ -489,6 +541,16 @@ if opp == 1
     % Initial transmission: build a fresh MAC PDU from whatever LCP allocates.
     avail = sap.lchDataAvailable(u.lch);
     if ~any(avail > 0)
+        % Clause 5.22.1.3.1's FOURTH flush condition: an initial-transmission grant for which
+        % the multiplexing entity produced no MAC PDU ("3> else: 4> flush the HARQ buffer").
+        % Not feedback-driven, which is why mac.harqFlush is its own function. Without it the
+        % previous MAC PDU stays in the buffer and gets retransmitted at this period's
+        % retransmission opportunity -- a stale TB sent again under a fresh grant, wasting the
+        % resource and, worse, delivering a duplicate whose packets were already resolved.
+        if u.curProc >= 1 && ~isempty(u.curTb)
+            u.harq  = mac.harqFlush(u.harq, u.curProc);
+            u.curTb = false(0, 1);
+        end
         return;                                 % a reserved opportunity with nothing to send
     end
     % The transport block is whatever THIS grant's L_subCH carries -- it varies per grant now
@@ -560,7 +622,20 @@ else
     end
 end
 
+% ---- congestion control, TS 38.214 clause 8.1.6 --------------------------
+% The limit is normative and the response is not: congestionControlCheck REPORTS, and
+% phy.rx.policy.congestionDrop decides. The check happens here, immediately before committing
+% the transmission, because clause 8.1.6 constrains transmissions in slot n rather than grants.
+[withinLimit, u] = congestionCheck(u, scen, nLog, nPhys);
+if phy.rx.policy.congestionDrop(withinLimit)
+    dropped = true;
+    return;
+end
+
 u.grant = mac.grantOnTransmission(u.grant, opp);
+% This UE's OWN occupancy this slot, for CR. Other UEs' transmissions belong to CBR, not here:
+% counting them would throttle this UE against traffic that is not its own.
+u.usedHistory(mod(nPhys, scen.crWindowTotal) + 1) = u.grant.lSubch;
 
 t.slotPhysical = nPhys;
 t.slotLogical  = nLog;
@@ -739,4 +814,33 @@ minGap = phy.rx.policy.minResourceGapSlots(nLog, scen.slPsfchPeriod, scen.minTim
 u.grant         = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, true, counter);
 u.periodIdx     = 0;
 u.periodRefSlot = slots(1);
+end
+
+% =========================================================================
+function [withinLimit, u] = congestionCheck(u, scen, nLog, nPhys)
+%congestionCheck CBR, CR and the clause 8.1.6 limit test for one UE in one slot.
+%Spec:   TS 38.215 V16.7.0 clauses 5.1.25 (CBR) and 5.1.26 (CR); TS 38.214 V16.17.0 clause
+%        8.1.6 (the limit). The measurement window lengths are normative, the past/future split
+%        and the response are not.
+
+% CBR over [n-a, n-1]: the circular buffer already holds exactly that, since slot n's own row
+% is not written until the MEASURE phase at the end of this slot.
+u.cbr = phy.ts38215.cbr(u.rssiWindow, scen.pool.threshSRssiCbrDbm);
+
+% The CR limit for this UE's priority at the measured CBR. Clause 8.1.6 evaluates CBR in slot
+% n-N, N from procTimeCongestion -- the measurement cannot be acted on instantly. Modelled by
+% using the window that ends at n-1 and noting that N is smaller than the CBR window itself, so
+% the value is the same to within one window's smoothing.
+level = phy.ts38214.cbrRangeIndex(u.cbr, scen.pool.cbrRangeUpperBounds);
+crLimitPerPriority = repmat(scen.pool.crLimitByLevel(level), 1, 8);
+
+% CR: this UE's own occupancy over [n-a, n+b]. With b = 0 the future half is empty.
+idxPast = mod(nPhys - (1:scen.crPastSlots), scen.crWindowTotal) + 1;
+subchUsedPast = sum(u.usedHistory(idxPast));
+crRatio = phy.ts38215.cr(subchUsedPast, 0, scen.numSubchannel, ...
+    scen.crPastSlots, scen.crFutureSlots, scen.crWindowTotal);
+
+crPerPriority = zeros(1, 8);
+crPerPriority(u.prio) = crRatio;
+withinLimit = phy.ts38214.congestionControlCheck(crPerPriority, crLimitPerPriority, true(1, 8));
 end

@@ -245,6 +245,52 @@ threshold, and 10 rounds is 30 dB. `scenarioInit` now derives it from the deploy
 separation (18 for this scenario). The bound raising was it working correctly and reporting
 that it had been set too low.
 
+### Congestion control — CBR, CR and clause 8.1.6
+The full chain runs: `phy.ts38215.cbr` over a rolling per-sub-channel RSSI window,
+`phy.ts38214.cbrRangeIndex` to a CBR level, `phy.ts38215.cr` over the UE's own occupancy, and
+`phy.ts38214.congestionControlCheck` for the limit. `kpi.cbrMean`, `kpi.cbrMax` and
+`kpi.nCongestionDrop` report it.
+
+- **MEASURE runs after RX, and that ordering is load-bearing.** The CBR window is `[n-a, n-1]`,
+  so slot n's measurement is written *after* slot n's transmissions are evaluated and read by
+  slot n+1's transmit decision. Measuring before RX would put slot n inside its own window.
+- **An unmonitored slot is NaN, not idle.** A UE that transmitted measured nothing, and
+  `phy.ts38215.cbr` reads NaN as "not measured". Scoring it idle would make a busy channel look
+  emptier the busier it gets, since a UE transmits more when it has more to send.
+- **CBR counts everyone; CR counts only this UE.** That is the whole difference between them.
+  `usedHistory` records the UE's own occupied sub-channels per slot and nothing else —
+  including other UEs' transmissions there would throttle a UE against traffic that is not its
+  own.
+- **The limit is normative, the response is not.** `congestionControlCheck` reports;
+  `phy.rx.policy.congestionDrop` decides. Clause 8.1.6's closing sentence — "It is up to UE
+  implementation how to meet the above limits, including dropping the transmissions in slot n"
+  — is the split. Dropping is the bluntest response it permits; lowering the MCS, taking fewer
+  sub-channels, or dropping only the retransmission all spend less channel without losing the
+  packet, and all need a feedback path from the measurement into the selection policy that does
+  not exist yet.
+- **Congestion drops are counted separately from losses.** A packet the UE *chose* not to send
+  is a different thing from one the channel destroyed, and the two are indistinguishable in a
+  PRR figure — so a hard-throttling policy would otherwise read as a bad radio link.
+
+Measured: CBR 0.026 / 0.059 / 0.067 / 0.072 at 10 / 30 / 60 / 100 UEs, and tightening the CR
+limit gives a monotone response — 0, 243 and 332 drops at limits 1.0, 0.001 and 0.0005, with
+goodput falling with each.
+
+### `sl-PrioritisedBitRate` was 0, which made the token buckets inert
+LCP's first pass is `SBj`-limited. With `sl-PrioritisedBitRate` at 0 the buckets never rise
+above zero, that pass allocates nothing, and every byte is served by clause 5.22.1.4.1.3's
+second ("regardless of the value of SBj") pass. **The totals still come out right**, so nothing
+looks wrong — the prioritised-bit-rate mechanism that is the point of clause 5.22.1.4.1 is
+simply not running. `mac.slLcpBucket` is now called once per slot, and the scenario configures
+one CAM's worth of PBR with a 100 ms bucket.
+
+### `harqFlush` — clause 5.22.1.3.1's fourth flush condition
+An initial-transmission opportunity arriving with nothing to send flushes the buffer
+("3> else: 4> flush the HARQ buffer"). Without it the *previous* MAC PDU stays in the buffer
+and is retransmitted at this period's retransmission opportunity — a stale TB sent again under
+a fresh grant, wasting the resource and delivering a duplicate whose packets were already
+resolved.
+
 ### The two reliability figures, which are different numbers
 - **`kpi.prr` is packet-level:** a packet counts as delivered if *any* receiver decoded it.
   This is what closes a latency figure — a packet has one latency, not one per listener — and
