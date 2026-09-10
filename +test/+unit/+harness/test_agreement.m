@@ -22,7 +22,10 @@ function test_agreement()
 
 tbl  = harness.phyabs.blerTable();
 scen = harness.sls.scenarioInit(4, 1);
-tol  = 0.15;                          % stated tolerance, absolute BLER
+% Stated tolerance, absolute BLER. Wide enough to absorb the binomial noise of a 60-trial
+% measurement in the steep part of a waterfall (one standard deviation at BLER 0.5 is 0.065) and
+% no wider -- a tolerance loose enough to pass regardless would not be a gate.
+tol  = 0.15;
 
 %% ---- the table itself is well formed -----------------------------------
 assert(issorted(tbl.snrDb), 'the SNR axis must be ascending for interpolation');
@@ -61,18 +64,36 @@ for m = tbl.mcs
     assert(all(diff(b) <= 1e-12), 'MCS %d: BLER must not rise with attempts, got %s', m, mat2str(b, 3));
 end
 
+%% ---- the grid must actually RESOLVE the waterfall -----------------------
+% An AWGN waterfall for a few-thousand-bit LDPC block is only 1 to 3 dB wide. A table whose SNR
+% grid is coarser than that stores a step as two adjacent points, 1 and 0, and the interpolation
+% then reports a ramp across a band where reality is a cliff -- an SLS reading it would see
+% BLER 0.5 over a whole decibel that no transmission ever experiences. This assertion is what
+% stopped the first table (a uniform 1 dB grid, zero intermediate points for two of five MCS)
+% from being shipped.
+for m = 1:numel(tbl.mcs)
+    c = squeeze(tbl.pssch(m, :, 1));
+    nIntermediate = nnz(c > 0.02 & c < 0.98);
+    assert(nIntermediate >= 3, ...
+        'MCS %d has only %d resolved intermediate point(s): the SNR grid is coarser than the waterfall, so the table stores a step and the interpolation invents a ramp', ...
+        tbl.mcs(m), nIntermediate);
+end
+
 %% ---- THE GATE: measured link outcome vs the abstraction, between grid points
-% Probing halfway between measured SNRs, so the prediction comes from the interpolation rule.
+% Probing BETWEEN measured SNRs, so the prediction comes from the interpolation rule rather than
+% a stored value. The probes straddle the waterfall, where a disagreement would actually show:
+% in the saturated regions both paths agree trivially and the comparison proves nothing.
 mcs = tbl.mcs(2);
 lc  = harness.lls.linkConfig(mcs, tbl.meta.LsubCH, scen);
 st  = RandStream('mt19937ar', 'Seed', 4242);
 
-% Pick probe points that straddle the waterfall, where disagreement would actually show.
-c   = squeeze(tbl.pssch(2, :, 1));
-kMid = find(c <= 0.5, 1);
-probes = tbl.snrDb(max(1, kMid - 1)) + 0.5 + [0 1];
+c    = squeeze(tbl.pssch(2, :, 1));
+band = find(c > 0.02 & c < 0.98);
+assert(~isempty(band), 'the probe MCS must have a resolved transition');
+% Midpoints of the first and last resolved intervals, so both land strictly between grid points.
+probes = [mean(tbl.snrDb(band(1) - 1:band(1))), mean(tbl.snrDb(band(end):band(end) + 1))];
 
-nTrials = 40;
+nTrials = 60;
 for j = 1:numel(probes)
     snr = probes(j);
     predicted = harness.phyabs.blerLookup(mcs, snr, 1, 'awgn', 0);
@@ -83,7 +104,7 @@ for j = 1:numel(probes)
     end
     measured = fails / nTrials;
     assert(abs(measured - predicted) <= tol, ...
-        'LLS and SLS disagree at MCS %d, SNR %.1f dB: link level measured %.3f, the abstraction predicts %.3f (tolerance %.2f). Per +harness/CLAUDE.md the abstraction is wrong, not the LLS.', ...
+        'LLS and SLS disagree at MCS %d, SNR %.2f dB: link level measured %.3f, the abstraction predicts %.3f (tolerance %.2f). Per +harness/CLAUDE.md the abstraction is wrong, not the LLS.', ...
         mcs, snr, measured, predicted, tol);
 end
 

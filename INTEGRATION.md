@@ -167,21 +167,32 @@ and a PRR-vs-distance curve of roughly the expected shape. **Met** — a 50-UE, 
 PRR 0.998 below 50 m falling through 0.61 at 300-400 m to 0.0006 past 600 m, mean latency
 37.5 ms with p99 93.5 ms inside the 100 ms PDB, and 24 kbps of goodput per UE.
 
-### Phase 2 — the real waveform, behind the same PHY SAP
+### Phase 2 — the real waveform, behind the same PHY SAP  — **DONE** (PSCCH + PSSCH)
 B4 and B5: `+phy/+chan/` transmit chains and `+phy/+rx/` sync, CE, EQ and detection, as
 `+harness/+lls/`. Same SAPs, so the two fidelities become swappable by configuration — which is
 what `+harness/CLAUDE.md`'s LLS/SLS agreement test needs in order to exist.
 
 *Done when:* loopback with no channel is bit-exact, and PSCCH/PSSCH BLER over AWGN and TDL has
-the expected shape.
+the expected shape. **Met for AWGN**: both chains round-trip bit-exact, PSCCH falls 0.99 → 0.00
+between −10 and −2 dB and PSSCH between 0 and +4 dB at MCS 7, and the RE accounting test shows
+no element claimed twice or written unclaimed. **Not met for TDL** — `+harness/+chanmodel/`
+has no fading model, so only the AWGN half of that gate is closed. `psbchTx`/`psfchTx` are also
+not built: nothing consumes them (sync is idealised, PSFCH is modelled at sequence-detection
+level), so they are additions rather than gaps in the loop.
 
-### Phase 3 — generate the real BLER tables
+### Phase 3 — generate the real BLER tables  — **DONE** (AWGN)
 Run Phase 2 across the key structure fixed in Phase 0; replace Phase 1's placeholder curve.
 State the interpolation rule and the out-of-range behaviour explicitly — silent extrapolation
 off the end of a BLER table is how an SLS produces confident nonsense.
 
 *Done when:* LLS and SLS agree on PRR, within a stated tolerance, for a scenario simple enough
-to run in both. If they disagree, the abstraction is wrong, not the LLS.
+to run in both. If they disagree, the abstraction is wrong, not the LLS. **Met** —
+`+test/+unit/+harness/test_agreement.m` probes *between* table grid points (so the prediction
+comes from the interpolation rule, not a stored value) at a stated ±0.15 absolute-BLER
+tolerance, and additionally pins that both paths mean the same thing by "SINR".
+
+`blerLookup` kept its five-key signature through the switch, so **no caller changed** — which
+is what fixing the key structure in Phase 0, before any curve existed, was for.
 
 ### Phase 4 — deepen the upper layers
 Real RLC segmentation and AM, PDCP, SDAP, PC5-S. These shape the latency **tail**, not whether
