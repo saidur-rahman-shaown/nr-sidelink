@@ -4,7 +4,13 @@ function llr = demodLLR(symbols, modulation, noiseVar)
 %        not normative; only the constellation it inverts is.
 %Inputs: symbols     nSym-by-1 complex column vector -- equalised received symbols
 %        modulation  char, one of 'BPSK','QPSK','16QAM','64QAM','256QAM'
-%        noiseVar    real, >0 -- post-equalisation noise variance per symbol
+%        noiseVar    real, >0 -- post-equalisation noise variance. Either a scalar for the
+%                    whole block, or an nSym-by-1 vector giving it PER SYMBOL. The vector form
+%                    is what phy.rx.eq.zfEqualise produces: zero forcing divides the noise by
+%                    the channel, so an RE in a fade comes out far noisier than a strong one,
+%                    and collapsing that to a scalar tells the decoder a faded RE is as
+%                    reliable as a clean one -- confidently wrong LLRs exactly where the errors
+%                    are
 %Outputs: llr  (nSym*Qm)-by-1 real column vector -- LLRs in the bit order clause 5.1 maps,
 %              **negative for a probable 1**
 %
@@ -25,9 +31,25 @@ legal = {'BPSK', 'QPSK', '16QAM', '64QAM', '256QAM'};
 if ~ismember(modulation, legal)
     error('lib:demodLLR:badModulation', 'demodLLR: "%s" is not one of BPSK/QPSK/16QAM/64QAM/256QAM', modulation);
 end
-if ~(isscalar(noiseVar) && isreal(noiseVar) && noiseVar > 0)
-    error('lib:demodLLR:badNoiseVar', 'demodLLR: noiseVar must be a positive real scalar, got %s', mat2str(noiseVar));
+if ~isreal(noiseVar) || any(noiseVar(:) <= 0)
+    error('lib:demodLLR:badNoiseVar', 'demodLLR: noiseVar must be positive and real');
+end
+nSym = numel(symbols);
+if ~isscalar(noiseVar) && numel(noiseVar) ~= nSym
+    error('lib:demodLLR:noiseVarLength', 'demodLLR: a per-symbol noiseVar must be %d long, got %d', nSym, numel(noiseVar));
 end
 
-llr = nrSymbolDemodulate(symbols(:), modulation, noiseVar);
+if isscalar(noiseVar)
+    llr = nrSymbolDemodulate(symbols(:), modulation, noiseVar);
+    return;
+end
+
+% Per-symbol variance. Demodulate once at unit variance, then scale each symbol's Qm LLRs by
+% 1/nv. Gray-mapped LLRs are inversely proportional to the noise variance, so the scaling is
+% exact rather than an approximation -- and doing it this way calls the toolbox demapper once
+% instead of once per symbol.
+llrUnit = nrSymbolDemodulate(symbols(:), modulation, 1);
+Qm      = numel(llrUnit) / nSym;
+scale   = repelem(1 ./ noiseVar(:), Qm);
+llr     = llrUnit .* scale;
 end

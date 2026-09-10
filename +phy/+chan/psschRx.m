@@ -44,9 +44,22 @@ if nTotal <= Msymb1
     error('chan:psschRx:tooFewSymbols', 'psschRx: %d symbols cannot hold a %d-symbol SCI-2 plus data', nTotal, Msymb1);
 end
 
-% Demodulate each portion at its own modulation, then join in bit order.
-llrSci2 = phy.lib.demodLLR(eqSymbols(1:Msymb1), 'QPSK', rxp.noiseVar);
-llrData = phy.lib.demodLLR(eqSymbols(Msymb1 + 1:end), rxp.modScheme, rxp.noiseVar);
+% Demodulate each portion at its own modulation, then join in bit order. The noise variance is
+% sliced with the symbols when it is per-RE: zero forcing makes it vary across the allocation,
+% and handing the SCI-2 demapper the data portion's variances (or vice versa) misweights every
+% LLR in the block.
+if isscalar(rxp.noiseVar)
+    nvSci2 = rxp.noiseVar;
+    nvData = rxp.noiseVar;
+else
+    if numel(rxp.noiseVar) ~= nTotal
+        error('chan:psschRx:noiseVarLength', 'psschRx: a per-RE noiseVar must be %d long, got %d', nTotal, numel(rxp.noiseVar));
+    end
+    nvSci2 = rxp.noiseVar(1:Msymb1);
+    nvData = rxp.noiseVar(Msymb1 + 1:end);
+end
+llrSci2 = phy.lib.demodLLR(eqSymbols(1:Msymb1), 'QPSK', nvSci2);
+llrData = phy.lib.demodLLR(eqSymbols(Msymb1 + 1:end), rxp.modScheme, nvData);
 llr     = [llrSci2; llrData];
 
 % cinit for PSSCH is 2^15 * N_ID + 1010, with N_ID the PSCCH CRC -- kept visible at the call
