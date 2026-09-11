@@ -46,10 +46,26 @@ assert(errBad ~= 0, 'dciCrcCheck: corrupted block should not verify');
 
 %% slBchEncode
 mibBits = logical(randi([0 1], 32, 1));
+% Clause 8.1 states the rule in terms of the RRC field: E = 1386 when cyclicPrefix is
+% CONFIGURED, otherwise 1782. TS 38.331's BWP IE makes that field ENUMERATED {extended}
+% OPTIONAL, "If not set, the UE uses the normal cyclic prefix" -- so configured means extended.
+% Hence normal = 1782 and extended = 1386.
+%
+% This assertion pinned the INVERSE until 2026-09-11, which is why the defect survived: the
+% code and its test agreed with each other. The lengths are now cross-checked against the
+% resource allocation they must fill, which is the independent fact neither could fake.
 outNormal = phy.ts38212.slBchEncode(mibBits, 'normal');
-assert(numel(outNormal) == 1386, 'slBchEncode: normal CP expected 1386 bits, got %d', numel(outNormal));
+assert(numel(outNormal) == 1782, 'slBchEncode: normal CP expected 1782 bits, got %d', numel(outNormal));
 outExtended = phy.ts38212.slBchEncode(mibBits, 'extended');
-assert(numel(outExtended) == 1782, 'slBchEncode: extended CP expected 1782 bits, got %d', numel(outExtended));
+assert(numel(outExtended) == 1386, 'slBchEncode: extended CP expected 1386 bits, got %d', numel(outExtended));
+% The cross-check: TS 38.211 clause 8.4.3.1 gives N_symb^S-SSB = 13 (normal) / 11 (extended),
+% and Table 8.4.3.1-1 puts PSBCH on (N_symb - 4) symbols x 99 subcarriers. QPSK, so the coded
+% length must be exactly twice the RE count. A future inversion fails HERE, against 38.211,
+% rather than agreeing with itself.
+assert(numel(outNormal) == 2 * size(phy.ts38211.slPSBCHIndices(13), 1), ...
+    'the normal-CP codeword must exactly fill the 891 PSBCH REs of a 13-symbol S-SSB');
+assert(numel(outExtended) == 2 * size(phy.ts38211.slPSBCHIndices(11), 1), ...
+    'the extended-CP codeword must exactly fill the 693 PSBCH REs of an 11-symbol S-SSB');
 
 try
     phy.ts38212.slBchEncode(mibBits, 'invalid');

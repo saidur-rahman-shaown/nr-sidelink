@@ -26,13 +26,11 @@ assert(isequal(logical(mibRx(:)), logical(mib(:))), 'PSBCH loopback must be bit-
 assert(info.nDataRE == 891, 'normal CP must give 891 PSBCH data REs, got %d', info.nDataRE);
 assert(info.E == 1782, 'and therefore E = 1782, got %d', info.E);
 assert(size(phy.ts38211.slPSBCHIndices(11), 1) == 693, 'extended CP must give 693 REs');
-% phy.ts38212.slBchEncode maps the two labels the other way round. psbchTx compensates by
-% choosing the label that yields the right length and asserting the result; if slBchEncode is
-% ever corrected, that assertion fires rather than a wrong-length codeword being emitted.
-assert(numel(phy.ts38212.slBchEncode(mib, 'extended')) == 1782 && ...
-       numel(phy.ts38212.slBchEncode(mib, 'normal')) == 1386, ...
-       ['slBchEncode''s cyclic-prefix mapping has changed. It is inverted relative to clause 8.1 ' ...
-        'and to the RE count; phy.chan.psbchTx compensates at its call site and must be revisited.']);
+% slBchEncode was inverted on these two labels until 2026-09-11 and psbchTx compensated at its
+% call site; both are corrected now, so the label and the allocation must agree directly.
+assert(numel(phy.ts38212.slBchEncode(mib, 'normal')) == 1782 && ...
+       numel(phy.ts38212.slBchEncode(mib, 'extended')) == 1386, ...
+       'slBchEncode must give normal CP 1782 bits and extended 1386, per clause 8.1 and TS 38.331''s cyclicPrefix field');
 
 %% ---- RE accounting across the whole block ------------------------------
 % Every RE is attributable, nothing is claimed twice, and the unwritten ones are exactly the

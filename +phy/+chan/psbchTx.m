@@ -14,26 +14,20 @@ function [blockGrid, info] = psbchTx(blockGrid, carrier, cfg, mibBits, NID1, NID
 %Outputs: blockGrid  the input with S-PSS, S-SSS, PSBCH DM-RS and PSBCH written
 %         info       scalar struct: .E .dataInd .dmrsInd .spssInd .sssInd .nDataRE
 %
-%!! A DEFECT IN slBchEncode's CYCLIC-PREFIX MAPPING, WORKED AROUND HERE !!
-%-------------------------------------------------------------------------
-%TS 38.212 clause 8.1 reads: "the rate matching output sequence length E = 1386 when higher
-%layer parameter cyclicPrefix is configured, otherwise, E = 1782." The RRC field `cyclicPrefix`
-%is present only for EXTENDED cyclic prefix, so the clause means extended -> 1386, normal ->
-%1782. `phy.ts38212.slBchEncode` has the two labels the other way round: it returns 1386 for
-%'normal' and 1782 for 'extended'.
+%THE CODEWORD LENGTH IS DERIVED FROM THE ALLOCATION, NOT FROM A LABEL
+%---------------------------------------------------------------------
+%E is computed as 2 x (PSBCH data REs) -- QPSK, clause 8.4.1 -- and the cyclic-prefix label is
+%then derived from the S-SSB symbol count rather than passed in. The codeword must fill exactly
+%those REs, so the allocation is the authoritative source and the label is a consequence of it.
 %
-%The resource grid confirms the clause independently. PSBCH occupies 99 subcarriers in
-%N_symb^S-SSB - 4 symbols, so normal CP (13 symbols) gives 891 REs = **1782** QPSK bits and
-%extended (11 symbols) gives 693 REs = **1386**. `phy.ts38211.slPSBCHIndices` returns exactly
-%those counts. Two frozen modules therefore contradict each other, and the spec text and the RE
-%arithmetic both point the same way.
-%
-%slBchEncode is not modified here (it is one of the verified TS 38.212 modules). Instead this
-%function sizes the codeword from the RE count -- which is authoritative, since the bits must
-%fill exactly those REs -- and calls slBchEncode with whichever label currently produces that
-%length. The assertion below then checks the result, so if slBchEncode is ever corrected this
-%call site fails loudly instead of silently emitting a codeword of the wrong length.
-
+%This ordering is deliberate and has already earned itself. phy.ts38212.slBchEncode's two
+%labels were inverted (normal returned 1386 where clause 8.1 and TS 38.331's RRC field
+%definition give 1782), and the assertion below is what caught it: a length taken from a label
+%disagreed with a length taken from the grid. The defect had survived because slBchEncode's own
+%unit test asserted the same inversion -- code and test agreeing with each other, which
+%+test/CLAUDE.md names as proving self-consistency rather than correctness. slBchEncode and its
+%test were corrected on 2026-09-11; the assertion stays, because it is the only check here that
+%compares two independent facts rather than one fact with itself.
 dataInd = phy.ts38211.slPSBCHIndices(cfg.Nsymb);
 dmrsInd = phy.ts38211.slPSBCHDMRSIndices(cfg.Nsymb);
 spssInd = phy.ts38211.slSPSSIndices();
@@ -42,18 +36,21 @@ sssInd  = phy.ts38211.slSSSSIndices();
 nDataRE = size(dataInd, 1);
 E       = 2 * nDataRE;                       % PSBCH is QPSK, clause 8.4.1
 
-% See the header. The label is chosen by the length it yields, not by its name.
-if E == 1782
-    cpLabelForE = 'extended';
-elseif E == 1386
-    cpLabelForE = 'normal';
-else
-    error('chan:psbchTx:unexpectedE', 'psbchTx: %d PSBCH data REs imply E=%d, which clause 8.1 does not define', nDataRE, E);
+% The cyclic prefix follows from the S-SSB symbol count: TS 38.211 clause 8.4.3.1 gives
+% N_symb^S-SSB = 13 for normal and 11 for extended.
+switch cfg.Nsymb
+    case 13
+        cyclicPrefix = 'normal';
+    case 11
+        cyclicPrefix = 'extended';
+    otherwise
+        error('chan:psbchTx:badNsymb', 'psbchTx: N_symb^S-SSB must be 13 (normal CP) or 11 (extended), got %d', cfg.Nsymb);
 end
-coded = phy.ts38212.slBchEncode(mibBits, cpLabelForE);
+coded = phy.ts38212.slBchEncode(mibBits, cyclicPrefix);
+% The check that caught the inversion: a length from the label against a length from the grid.
 assert(numel(coded) == E, ...
-    'chan:psbchTx:codewordLength: slBchEncode returned %d bits for a %d-RE allocation needing %d -- its cyclic-prefix mapping has changed; see this function''s header', ...
-    numel(coded), nDataRE, E);
+    'chan:psbchTx:codewordLength: slBchEncode returned %d bits for ''%s'' but the %d-RE PSBCH allocation needs %d -- the two disagree; see this function''s header', ...
+    numel(coded), cyclicPrefix, nDataRE, E);
 
 d = phy.ts38211.slPSBCH(carrier, cfg, coded);
 
