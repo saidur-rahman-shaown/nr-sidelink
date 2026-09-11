@@ -8,7 +8,8 @@ root = fileparts(here);                    % repo root
 addpath(root);
 
 tests = { ...
-    @test.unit.mac.test_macSidelink};
+    @test.unit.mac.test_macSidelink, ...
+    @test.unit.mac.test_macRx};
 
 nFail = 0;
 t0 = tic;

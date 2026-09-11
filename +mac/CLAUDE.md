@@ -339,3 +339,52 @@ traceable in the log — met by construction, since the whole lifecycle is an ex
 all randomness is an input. **Not built:** the time-frequency plot of one UE over several seconds
 showing the SPS pattern, a keep decision and a reselection; that needs a harness, which does not
 exist yet.
+
+## RX path (clause 5.22.2) — added, and the existing TX modules were not touched
+| Module | Clause | Notes |
+|---|---|---|
+| `demuxSlSch` | 5.22.2.3, 6.1.6, 6.2.4 | the inverse of `muxSlSch`; parsing stops at the padding subheader |
+| `pduFilter` | 5.22.2.2.2 | the identity cross-check — Figure 4.2.2-3's "PDU filtering (RX only)" |
+| `harqRxInit` / `harqRxAssign` / `harqRxProcess` | 5.22.2.2.1, 5.22.2.2.2 | the receive HARQ entity and its feedback rules |
+
+### Traps in the receive path
+- **A receive process is keyed on a TRIPLE, not a process number.** Clause 5.22.2.2.1
+  associates each process with the *Sidelink identification information* **and** the Sidelink
+  process ID — so (SCI Source ID, SCI Destination ID, HARQ process ID). Two peers using the
+  same HARQ process number are two different processes, and NOTE 2 makes the association
+  one-to-one in both directions. Keying on the number alone makes two peers share a soft
+  buffer, so one peer's retransmission is combined into another's TB and decodes to noise — at
+  a rate that rises with neighbour count, which reads as congestion.
+- **The NDI toggle is compared per triple too**, for the same reason. A global last-NDI sees a
+  toggle whenever two peers interleave, flushes a good soft buffer, and loses the combining
+  gain silently.
+- **A first reception counts as a toggle.** "...or this is the very first received transmission
+  for the pair". Without it a receiver joining mid-stream waits for the next toggle before
+  decoding anything, which looks like a slow-to-acquire link.
+- **The unicast filter is CROSSED.** The subheader's DST is matched against this UE's own
+  **Source** Layer-2 IDs and the subheader's SRC against the **Destination** Layer-2 IDs it
+  holds for peers. The sender's destination is the receiver's own source identity. Matching DST
+  against own destinations makes a UE accept only traffic it sent itself.
+- **LCID 0/1 on the first TB bypasses the SRC check**, and that branch is load-bearing: before
+  a peer's identity is known there is no Destination Layer-2 ID to match SRC against, so
+  dropping it makes a unicast link that can never be established — and it fails silently,
+  because every *later* TB would match.
+- **"Successfully decoded before" is a separate arm from "decoded now".** A retransmission of an
+  already-delivered TB must still be ACKed, or the transmitter keeps retransmitting something
+  the receiver has. Only the first success delivers.
+- **NACK-only groupcast sends NOTHING on success.** Silence is the positive acknowledgement.
+  An ACK there transmits on a PSFCH resource the scheme does not allocate to this UE, colliding
+  with the NACKs of other group members — who share it precisely because only failures speak.
+- **A decoded PDU that fails the identity filter still frees its process and still gets a
+  feedback response.** It was received correctly; it simply was not for this UE. Holding the
+  process open leaks one to every neighbour this UE can hear.
+- **No free process is a DROP, and that is a choice.** NOTE 1 leaves it to implementation.
+  `harqRxAssign` returns `procIdx = 0` rather than evicting a process mid-reassembly, which
+  would discard a soft buffer a retransmission was about to complete — trading a certain loss
+  for a probable one. Reported as a value so a caller can count it.
+
+### Soft combining is instructed, not performed
+Clause 5.22.2.2.2 tells the *physical layer* to combine. `harqRxProcess` returns a `combine`
+flag rather than holding LLRs, because a normative package may not hold hidden state
+(`.claude/rules/normative-packages.md`) and a soft buffer is exactly that. The caller that owns
+the LLRs does the combining — the same split `+harness/+lls/linkHarq` makes on the transmit side.
