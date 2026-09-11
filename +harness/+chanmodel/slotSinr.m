@@ -7,7 +7,10 @@ function [sinrDb, rxPowerDbm, canHear, sinrPscchDb] = slotSinr(air, posXY, radio
 %Inputs: air            1 x nTx struct array -- this slot's on-air transmissions, from
 %                       +rf/toAir. Fields used: .ueId .posXY .txPowerDbm .startSubch .LsubCH
 %        posXY          nUe x 2 real, metres -- every UE's position this slot
-%        radio          scalar struct: .fcHz .bwHz .noiseFigureDb .plExponent .plRefDistM
+%        radio          scalar struct: .fcHz .bwHz .noiseFigureDb .plModel, where .plModel is
+%                       a descriptor from harness.chanmodel.pathlossModel. The model is carried
+%                       as one opaque field rather than as loose exponent/reference-distance
+%                       parameters precisely so that changing model touches nothing here
 %        numSubchannel  integer, >=1 -- sl-NumSubchannel
 %        pscchPrb       integer, >=1 -- sl-FreqResourcePSCCH, PRBs the PSCCH occupies inside
 %                       the LOWEST sub-channel of the PSSCH allocation
@@ -51,10 +54,12 @@ function [sinrDb, rxPowerDbm, canHear, sinrPscchDb] = slotSinr(air, posXY, radio
 %none of it. So the two SINRs diverge whenever interference is partial-band -- which is the
 %normal case in a pool where allocations differ in width and position.
 %
-%The path loss model is a documented PLACEHOLDER -- see +harness/+chanmodel/pathlossDb. No
-%fading, no shadowing, no antenna pattern: a deterministic distance-based link. Absolute
-%PRR-versus-distance results are meaningless until it is replaced; comparisons between policies
-%on the same channel are not.
+%The path loss model is whatever harness.chanmodel.pathlossModel was asked for -- see that
+%function for the choices and harness.chanmodel.pathlossRma for the caveat that RMa is a
+%cellular model on a V2V geometry. Still absent regardless of model: fading, shadowing and
+%antenna pattern. The link is deterministic in distance, so a PRR-versus-distance curve carries
+%none of the variance a real one would; comparisons between policies on the same channel remain
+%the sound comparison.
 
 nTx = numel(air);
 nUe = size(posXY, 1);
@@ -78,7 +83,7 @@ end
 % ---- received power of every transmission at every UE ----------------------
 for i = 1:nTx
     d  = sqrt(sum((posXY - air(i).posXY).^2, 2))';       % 1 x nUe
-    pl = harness.chanmodel.pathlossDb(d, radio.fcHz, radio.plExponent, radio.plRefDistM);
+    pl = harness.chanmodel.pathloss(radio.plModel, d);
     rxPowerDbm(i, :) = air(i).txPowerDbm - pl;
 end
 rxPowerMw = 10.^(rxPowerDbm / 10);

@@ -41,7 +41,7 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
     +rf/         RF stage — our boundary, no 3GPP SAP exists         (built, thin)
     +app/        traffic generation                                  (periodic only)
     +rlc/ +pdcp/ +sdap/ +pc5s/   upper layers                        (planned, B9)
-    +harness/    +sls/ and +lls/ both run; BLER table measured       (B10, partial)
+    +harness/    +sls/ + +lls/ run; BLER measured, RMa channel       (B10, partial)
     +vec/ +test/ golden vectors and verification
 
 ## Normative vs ours

@@ -49,8 +49,26 @@ scen.radio = struct( ...
     'fcHz',          5.9e9, ...          % ITS band
     'bwHz',          scen.nPrb * 12 * 30e3, ...   % PRBs x 12 subcarriers x 30 kHz
     'noiseFigureDb', 9, ...
-    'plExponent',    2.7, ...            % placeholder; see chanmodel/pathlossDb
-    'plRefDistM',    1);
+    'plModel',       []);                % filled in below, once the geometry is known
+
+% The path loss model, chosen by NAME through the one entry point. Swapping it is a one-line
+% change here and touches no other file -- which is what harness.chanmodel.pathlossModel and
+% harness.chanmodel.pathloss exist to guarantee.
+%
+% RMa is TR 38.901's Rural Macro, a CELLULAR model applied to a V2V geometry; see
+% harness.chanmodel.pathlossRma for what that does and does not justify. TR 37.885's V2V models
+% are the ones a sidelink study should use, and neither a local PDF nor a toolbox
+% implementation exists for them.
+%
+% LOS is FIXED rather than drawn per link. TR 38.901 Table 7.4.2-1 gives a distance-dependent
+% LOS probability and there is no local PDF to extract it from, so a fixed mode is stated
+% rather than a recalled formula quietly applied. 'los' is the optimistic bound, 'nlos' the
+% pessimistic one, and the two bracket the real answer.
+scen.radio.plModel = harness.chanmodel.pathlossModel('rma', struct( ...
+    'fcHz',    scen.radio.fcHz, ...
+    'losMode', 'los', ...
+    'hTxM',    1.5, ...                  % vehicle-mounted antenna
+    'hRxM',    1.5));
 scen.pCmaxDbm     = 23;     % P_CMAX; slPowerControl is a max-power-always policy for now
 scen.channelModel = 'awgn';
 scen.speedKmh     = 0;
@@ -192,8 +210,7 @@ scen.congestionProcSlots = phy.ts38214.procTimeCongestion(scen.mu, 1);
 % raises ts38214:candidateSet:escalationLimit partway through a long run, which is the bound
 % doing its job and reporting that it was set too low.
 escalationStepDb = 3;                    % clause 8.1.4 step 7
-closestPl = harness.chanmodel.pathlossDb(scen.spacingM, scen.radio.fcHz, ...
-    scen.radio.plExponent, scen.radio.plRefDistM);
+closestPl = harness.chanmodel.pathloss(scen.radio.plModel, scen.spacingM);
 strongestRsrpDbm = scen.pCmaxDbm - closestPl;
 scen.policy.maxEscalations = ceil((strongestRsrpDbm - min(scen.pool.thresholdListDbm)) / escalationStepDb) + 1;
 

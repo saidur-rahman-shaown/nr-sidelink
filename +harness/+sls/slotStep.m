@@ -462,7 +462,7 @@ if nPsfch > 0
     rxMw    = zeros(nPsfch, numel(ue));
     for k = 1:nPsfch
         d  = sqrt(sum((scen.posXY - scen.posXY(txUe(k), :)).^2, 2))';
-        pl = harness.chanmodel.pathlossDb(d, scen.radio.fcHz, scen.radio.plExponent, scen.radio.plRefDistM);
+        pl = harness.chanmodel.pathloss(scen.radio.plModel, d);
         rxMw(k, :) = 10.^((scen.pCmaxDbm - pl) / 10);
     end
 end

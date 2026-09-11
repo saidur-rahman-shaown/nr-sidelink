@@ -345,23 +345,78 @@ resolved.
 Both are reported and never conflated. Reporting only the first is how a simulator claims
 perfect reliability over a channel that is failing most of its links.
 
-### What is a placeholder, stated so no result is misread
-- **`pathlossDb`** is log-distance with an exposed exponent. TR 37.885 — which carries the V2X
-  models this should use — has **no local PDF**; `+cfg/specVersions.json` lists TS37885 among
-  the unverified placeholders, so transcribing one from recall would only make it look
-  authoritative. Same discipline `+cfg/pqiTable.m` applies to its TS 23.287 rows.
-- **`blerLookup`** is a logistic whose midpoint rises with MCS. Right shape, invented numbers.
-- No fading, no shadowing, no antenna pattern.
+### The path loss model is modular, and RMa is the default
+Two functions are the whole interface: `harness.chanmodel.pathlossModel(name, params)`
+**constructs** a descriptor and `harness.chanmodel.pathloss(model, d)` **evaluates** it. Nothing
+else in the tree calls a path loss implementation directly, and none is reachable except through
+those two. Adding TR 37.885's V2V models means one implementation file and one `case` — no
+caller changes. `scen.radio.plModel` carries the descriptor; the loose `plExponent` /
+`plRefDistM` fields are gone, because two sources of truth for one quantity is one too many, and
+`test_chanmodel` asserts they have not come back.
 
-- **`psfchDetect`** is a logistic with a low midpoint and a steep slope, because a sequence
-  detector works at SINRs where no coded block would. Reusing `blerLookup` here would make
-  feedback fail at roughly the same range as data, which is exactly backwards. **Not modelled:**
-  false alarm, and the ACK/NACK confusion from detecting the wrong shift of the right sequence.
-  Both are real and asymmetric — a false ACK loses a packet silently, a false NACK only wastes a
-  retransmission — so a real curve must report them as a pair.
+| Model | Source |
+|---|---|
+| `rma` | TR 38.901 clause 7.4.1 Table 7.4.1-1, via the 5G Toolbox's `nrPathLoss` |
+| `logdistance` | none — the hand-rolled placeholder it replaced, kept for comparison |
 
-**Comparisons between policies on the same channel are meaningful. Absolute PRR-versus-distance,
-latency and throughput numbers are not, until Phase 3 replaces both with measured curves.**
+There is no TR 38.901 PDF in `Documentations/`, so the model is taken from the toolbox rather
+than transcribed from recall — the same discipline `+cfg/pqiTable.m` applies to its TS 23.287
+rows, resolved the other way because here an implementation exists.
+
+**RMa is a CELLULAR model on a V2V geometry.** It describes a base station (10–150 m) to a UE;
+a V2V link is two vehicles at ~1.5 m, outside its range on the transmitter side. The LOS branch
+tolerates it — path loss at 300 m moves 0.5 dB between a 1.5 m and a 35 m transmitter — but
+tolerating is not validating. Measured end to end, 50 UEs on a 1 km line:
+
+| Model | link PRR | PRR at 400–600 m | CBR |
+|---|---|---|---|
+| RMa LOS | 0.907 | 0.94 | 0.132 |
+| `logdistance` | 0.545 | 0.04 | 0.067 |
+| **RMa NLOS** | **0.060** | **0.00** | 0.006 |
+
+RMa NLOS gives no communication past the nearest neighbour — 175 dB by 1 km at a 1.5 m
+transmitter. That is a model far outside its fitted geometry, not a usable pessimistic bracket.
+Use LOS; NLOS exists because the mode is part of the model.
+
+**LOS is fixed, not drawn per link.** TR 38.901 Table 7.4.2-1 gives a distance-dependent LOS
+probability and there is no local PDF to extract it from, so a fixed mode is stated rather than
+a recalled formula quietly applied.
+
+**TR 37.885's V2V Urban and Highway are the models a sidelink study should use.** No local PDF,
+no toolbox implementation. RMa is a real, documented, standards-based model and a large
+improvement on a hand-rolled curve; it is still not the right model. Both are true, and the
+second is the one that gets forgotten once a number is in a plot.
+
+**A better channel changes what the test scenario must be.** The PRR-versus-distance shape test
+ran on 50 UEs at 20 m — a 1 km line, enough to reach the floor of the placeholder's curve. RMa
+LOS reaches further and still delivers 0.34 at 800–1200 m, so that line would have tested the
+scenario's length rather than the channel's shape. The test widens the spacing to 40 m: same UE
+count, same runtime, 2 km span, and a full curve — 1.000 near, 0.960 at 400–600 m, 0.748 at
+600–800 m, 0.172 at 800–1200 m, 0.000 beyond. The escalation bound is derived from the
+*closest* separation, so it must be recomputed whenever the spacing changes.
+
+### What is measured, and what is still a placeholder
+**`blerLookup` is measured.** It reads `harness.phyabs.blerTable` — BLER measured by
+`+harness/+lls/` over the real transmit chains, a real OFDM waveform, DM-RS channel estimation
+and zero-forcing equalisation, with soft combining across redundancy versions. Its five-key
+signature survived the switch, so no caller changed. An **off-key lookup is an error**, not a
+substitution: it rejects a channel model or speed the table was not measured under, because
+reading a table off-key is indistinguishable from having measured the right one.
+
+**`psfchDetect` is still a placeholder** — a logistic with a low midpoint and a steep slope,
+because a sequence detector works at SINRs where no coded block would. Reusing `blerLookup`
+here would make feedback fail at roughly the same range as data, which is exactly backwards.
+**Not modelled:** false alarm, and the ACK/NACK confusion from detecting the wrong shift of the
+right sequence. Both are real and asymmetric — a false ACK loses a packet silently, a false
+NACK only wastes a retransmission — so a real curve must report them as a pair.
+
+**Still absent: fading, shadowing, antenna pattern**, and therefore the TDL half of B5's gate.
+The BLER table is AWGN-only and says so in its own `.meta`. The link is deterministic in
+distance, so a PRR-versus-distance curve carries none of the variance a real one would.
+
+So: **link-level BLER and the abstraction that reads it are measured; the channel model is now
+a documented standards model used slightly out of geometry; fading is absent.** Policy-versus-
+policy comparisons on the same channel remain the soundest comparison this tree supports.
 
 ### Every packet lands in exactly one bucket
 `kpiReport` asserts it. Delivered, PDB-expired, sl-MaxTransNum spent, dropped, or still in

@@ -1,5 +1,5 @@
-function pl = pathlossDb(dMetres, fcHz, exponent, refDistM)
-%pathlossDb Log-distance path loss. A PLACEHOLDER, not a 3GPP model.
+function pl = pathlossLogDistance(dMetres, fcHz, exponent, refDistM)
+%pathlossLogDistance Log-distance path loss. A PLACEHOLDER, not a 3GPP model.
 %Spec:   NONE, and this matters. TR 37.885 (the 3GPP V2X evaluation methodology, which carries
 %        the Urban/Highway V2V models this should eventually use) has **no local PDF** --
 %        +cfg/specVersions.json lists TS37885 among the unverified placeholders. Rather than
@@ -26,10 +26,10 @@ function pl = pathlossDb(dMetres, fcHz, exponent, refDistM)
 
 c = 299792458;   % speed of light, m/s
 
-if ~(fcHz > 0), error('chanmodel:pathlossDb:badFc', 'pathlossDb: fcHz must be > 0'); end
-if ~(exponent > 0), error('chanmodel:pathlossDb:badExponent', 'pathlossDb: exponent must be > 0'); end
-if ~(refDistM > 0), error('chanmodel:pathlossDb:badRef', 'pathlossDb: refDistM must be > 0'); end
-if any(dMetres(:) < 0), error('chanmodel:pathlossDb:negativeDistance', 'pathlossDb: distance cannot be negative'); end
+if ~(fcHz > 0), error('chanmodel:pathlossLogDistance:badFc', 'pathlossLogDistance: fcHz must be > 0'); end
+if ~(exponent > 0), error('chanmodel:pathlossLogDistance:badExponent', 'pathlossLogDistance: exponent must be > 0'); end
+if ~(refDistM > 0), error('chanmodel:pathlossLogDistance:badRef', 'pathlossLogDistance: refDistM must be > 0'); end
+if any(dMetres(:) < 0), error('chanmodel:pathlossLogDistance:negativeDistance', 'pathlossLogDistance: distance cannot be negative'); end
 
 fsplRef = 20 * log10(4 * pi * refDistM * fcHz / c);
 d       = max(dMetres, refDistM);
