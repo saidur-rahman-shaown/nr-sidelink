@@ -137,12 +137,33 @@ receiver has **one hypothesis per position**, so at most one is decoded — the 
 survives the others as interference. That is the capture effect, and it is why a collision is
 not automatically a double loss.
 
+### The measured table, and how its grid was arrived at
+`harness.phyabs.blerTable` is generated output — 121 SNR points, 5 MCS values, 3 attempts —
+and it took three generations to get a grid that actually resolves what it measures. Both
+failures are worth keeping, because both produce a table that *looks* fine:
+
+1. **Uniform 1 dB grid.** An AWGN waterfall for a few-thousand-bit LDPC block is under 1 dB
+   wide, so the transition was stored as two adjacent points, 1 and 0 — **zero interior points
+   for two of five MCS**. The interpolation then invents a ramp across a decibel where reality
+   is a cliff. `test_agreement` now asserts at least two interior points per MCS.
+2. **Non-uniform grid fine only over the PSSCH band.** That left the PSCCH curve — which sits
+   about 12 dB lower, and which every sensing decode reads — resolved only to the coarse 2 dB
+   region.
+
+The final grid is 0.25 dB across −12 to +16 dB, covering both waterfalls: 2–4 interior points
+for PSSCH, 14–15 for PSCCH.
+
+Measured HARQ combining gain by the third attempt is 3.75 dB at MCS 4 rising to 7.75 dB at
+MCS 20 — it grows with the code rate, which is why the table has a retransmission dimension
+rather than a per-attempt dB bonus.
+
 ### The PSCCH curve is MEASURED, and the old proxy was badly wrong at high MCS
 While the BLER curve was a placeholder, the system-level model approximated PSCCH by reading
 the PSSCH curve at a deliberately low `pscchEffectiveMcs`. The reasoning — control is a much
 lower-rate code — was right; the magnitude was guessed. Measured, control's advantage over data
-is **1.75 dB at MCS 4 rising to 16 dB at MCS 20**, because PSCCH's own code rate does not move
-with the data's. No single proxy MCS can express an advantage that grows with the data rate, and
+is **3.75 dB at MCS 4 rising to 16 dB at MCS 20**, because PSCCH's own code rate does not move
+with the data's — its 50% point sits at about −2 dB whatever the PSSCH is doing, which is the
+measurement confirming PSCCH is MCS-independent as clause 8.3.2 implies. No single proxy MCS can express an advantage that grows with the data rate, and
 at high MCS the proxy understated control's reach badly. `harness.phyabs.pscchBler` reads the
 measured curve; `pscchEffectiveMcs` is gone.
 

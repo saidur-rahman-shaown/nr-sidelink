@@ -181,6 +181,9 @@ not built: nothing consumes them (sync is idealised, PSFCH is modelled at sequen
 level), so they are additions rather than gaps in the loop.
 
 ### Phase 3 — generate the real BLER tables  — **DONE** (AWGN)
+Measured: 121 SNR points x 5 MCS x 3 attempts, 0.25 dB across both waterfalls. PSCCH decodes
+3.75 dB (MCS 4) to 16 dB (MCS 20) earlier than PSSCH; HARQ combining is worth 3.75 to 7.75 dB
+by the third attempt. Both replaced guesses.
 Run Phase 2 across the key structure fixed in Phase 0; replace Phase 1's placeholder curve.
 State the interpolation rule and the out-of-range behaviour explicitly — silent extrapolation
 off the end of a BLER table is how an SLS produces confident nonsense.

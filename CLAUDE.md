@@ -32,8 +32,8 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
       +ts38213/  control procedures: sync, PSFCH, Mode-2 control     (built)
       +ts38214/  data procedures: sensing, Mode-2 selection, MCS/TBS (built)
       +ts38215/  measurements: SL-RSRP, SL-RSSI, CBR, CR             (built)
-      +chan/     PSBCH/PSCCH/PSSCH/PSFCH transmit chains             (planned, B4)
-      +rx/       non-normative receiver                              (planned, B5)
+      +chan/     PSCCH/PSSCH chains built; PSBCH/PSFCH not built     (B4, partial)
+      +rx/       +ce/ +eq/ built; +sync/ +det/ not built             (B5, partial)
         +policy/ Mode-2 selection policy — T1/T2, S_A draw, PDB       (built)
       +lib/      wrapped generics (OFDM, polar SCL, LDPC, LLR)
     +sap/        cross-layer SAP structs; the packet context and KPIs (built)
@@ -41,7 +41,7 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
     +rf/         RF stage — our boundary, no 3GPP SAP exists         (built, thin)
     +app/        traffic generation                                  (periodic only)
     +rlc/ +pdcp/ +sdap/ +pc5s/   upper layers                        (planned, B9)
-    +harness/    +sls/ runs end to end; +lls/ not built              (B10, partial)
+    +harness/    +sls/ and +lls/ both run; BLER table measured       (B10, partial)
     +vec/ +test/ golden vectors and verification
 
 ## Normative vs ours
@@ -85,3 +85,9 @@ example, or a module lacking a test file.
 
 ## Running a simulation
     matlab -batch "k = harness.sls.run(50, 4000, 7); disp(k)"   % nUe, physical slots, seed
+
+## Regenerating the BLER table
+`+harness/+phyabs/blerTable.m` is GENERATED — measured by `+harness/+lls/` over the real
+transmit chains. Do not hand-edit it; regenerate with `harness.lls.blerSweep` and re-emit.
+Takes about 45 minutes at the current grid. See `+harness/CLAUDE.md` for why the SNR grid is
+non-uniform and what two earlier grids got wrong.
