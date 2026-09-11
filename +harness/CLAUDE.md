@@ -125,6 +125,55 @@ suppresses the blind retransmission that broadcast must always spend.
   would turn every data failure into a DTX — and DTX drives radio link failure (clause
   5.22.1.3.3), not retransmission, so lossy-but-alive links would be declared dead.
 
+### The MAC receive path is wired, and delivery is EARNED
+`+sls/slotStep` used to credit `air(k).ctxIds` on a successful decode. It now runs the real
+clause 5.22.2 chain on the actual MAC PDU the transmitter built:
+
+    mac.sciInterest -> mac.harqRxAssign -> mac.demuxSlSch -> mac.pduFilter -> mac.harqRxProcess
+
+What the shortcut hid: a PDU addressed to someone else still counted as a delivery, so unicast
+reliability was being measured over every listener rather than the intended one.
+
+**Clause 5.22.2.2.1's interest gate has to come first**, and omitting it is expensive. "Each
+Sidelink process is associated with SCI in which the MAC entity is interested." Without that
+gate every neighbour allocates a receive process for every transmission it can hear *and*
+answers it on PSFCH, colliding with the addressed UE's feedback — whose transmitter then sees a
+DTX. Measured: wiring the receive path without the gate produced **8 spurious radio link
+failures** in a 10-UE unicast run that should have had none. The gate is `mac.sciInterest`; the
+bug is recorded because "the PDU gets discarded either way" is exactly the reasoning that makes
+it look unnecessary.
+
+**Feedback now comes from the HARQ entity, not from `gotTb`.** They differ in the case clause
+5.22.2.2.2 singles out: a retransmission of a TB already decoded must still be ACKed, or the
+transmitter keeps retransmitting something the receiver already has.
+
+Measured after wiring, 12 UEs unicast: ACKs suppress the blind retransmission entirely at 20 m
+(1.00 transmissions per delivery) and retransmissions return as the link lengthens (1.17 at
+200 m and beyond), with radio link failure at zero on short links.
+
+### Acquisition and blind detection run in the LLS, not the SLS
+`+phy/+rx/+sync/` and `+det/pscchSearch` need a resource grid, and the system-level path has
+none — it works from descriptors. So they are wired where a waveform exists:
+
+- **`+lls/linkSlot` blind-searches for the PSCCH** across every sub-channel start instead of
+  extracting at the transmitter's own indices, estimating and equalising each candidate from
+  its own DM-RS. It reports `pscchFalseAlarm` alongside `pscchOk`, because this tree's own rule
+  is that detection reports missed detection and false alarm **as a pair**.
+- **`+lls/syncSlot` is the whole acquisition chain**: S-SSB through delay, frequency offset and
+  noise, then `pssSearch` → align → `cfoEstimate` → correct → demodulate → `sssDetect` →
+  `psbchRx`. Every link can break the one after it — timing feeds the demodulator, N_ID,2 feeds
+  the S-SSS search, and the composed N_ID^SL feeds both the PSBCH descrambling and its DM-RS —
+  so a per-module test can pass on all four while the chain fails. `.acquired` is the
+  conjunction for that reason.
+
+Measured: 100% acquisition at 0 and −5 dB, 30% at −10 dB, 0% at −15 dB. **Timing stays
+reliable long after the chain stops acquiring** (100% at −10 dB, 95% at −15 dB) — the CFO
+estimate degrades first and the PSBCH fails on the residual offset, which is the chain effect
+the conjunction exists to expose.
+
+The SLS still models sync as ideal, per `BUILD.md`'s deferral. Nothing in `+sls/` consumes
+`+sync/`.
+
 ### The receiver SEARCHES; it is not handed the transmission list
 Reception is a loop over candidate **positions** — the start of every sub-channel — not over
 the transmissions that actually exist. Clause 8.1.2.2 puts the PSCCH in the lowest sub-channel

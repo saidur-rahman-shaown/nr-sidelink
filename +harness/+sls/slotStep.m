@@ -182,19 +182,58 @@ for i = 1:nUe
                 tbBler = harness.phyabs.blerLookup(air(k).mcs, sinrDb(k, i), air(k).rv + 1, ...
                     scen.channelModel, scen.speedKmh);
                 gotTb = rand(scen.stream) >= tbBler;
-                if gotTb
-                    [ue, resolved] = deliver(ue, resolved, air(k), nPhys, codes);
+
+                % ---- the REAL MAC receive path, TS 38.321 clause 5.22.2 ----
+                % Delivery is earned, not assumed. The transport block carries an actual MAC
+                % PDU (txPhase built it with mac.muxSlSch), so the receiver demultiplexes it,
+                % cross-checks the identity halves against the SCI, and runs the receive HARQ
+                % entity -- rather than the loop simply crediting air(k).ctxIds on a successful
+                % decode. What that shortcut hid: a PDU addressed to someone else still counted
+                % as a delivery, so unicast reliability was measured over every listener rather
+                % than the intended one.
+                % Clause 5.22.2.2.1's interest gate comes FIRST: a process is allocated only
+                % for an SCI this UE is interested in. Without it every neighbour allocates a
+                % process for every transmission it can hear AND answers it on PSFCH, colliding
+                % with the addressed UE's feedback -- measured as 8 spurious radio link failures
+                % in a 10-UE unicast run that should have had none.
+                rxProc = 0;
+                fb = 'none';
+                if mac.sciInterest(air(k).castType, mod(air(k).dstL2Id, 65536), ...
+                        ue(i).ownSrcL2Id, ue(i).ownDstL2Id)
+                    [ue(i).harqRx, rxProc, rxIsNew] = mac.harqRxAssign(ue(i).harqRx, ...
+                        mod(air(k).srcL2Id, 256), mod(air(k).dstL2Id, 65536), air(k).harqId, air(k).ndi);
                 end
+                if rxProc > 0
+                    passes = false;
+                    if gotTb
+                        [srcHigh16, dstHigh8, ~, ~, sduLcid] = mac.demuxSlSch(air(k).tb);
+                        passes = mac.pduFilter(air(k).castType, dstHigh8, srcHigh16, ...
+                            mod(air(k).dstL2Id, 65536), mod(air(k).srcL2Id, 256), ...
+                            ue(i).ownSrcL2Id, ue(i).ownDstL2Id, sduLcid, false);
+                    end
+                    [ue(i).harqRx, doDeliver, fb] = mac.harqRxProcess(ue(i).harqRx, rxProc, ...
+                        rxIsNew, gotTb, passes, air(k).castType, air(k).harqFeedbackEnabled == 1, true);
+                    if doDeliver
+                        [ue, resolved] = deliver(ue, resolved, air(k), nPhys, codes);
+                    end
+                end
+                % rxProc == 0 means either no interest, or no free process -- clause 5.22.2.2.1
+                % NOTE 1 leaves the latter's policy open. Either way the TB is dropped and no
+                % feedback is generated, which is what leaves `fb` at 'none'.
                 % Feedback is owed on the strength of the CONTROL decode, not the data decode:
                 % a NACK is precisely the report that the SCI was seen and the transport block
                 % was not. Owing feedback only on success would turn every data failure into a
                 % DTX, and DTX drives radio link failure (clause 5.22.1.3.3) rather than
                 % retransmission -- so lossy-but-alive links would be declared dead.
-                if scen.isUnicast && air(k).harqFeedbackEnabled == 1 && air(k).dstL2Id == ue(i).srcL2Id
+                % The feedback VALUE now comes from mac.harqRxProcess rather than from gotTb
+                % directly. They differ in the case clause 5.22.2.2.2 singles out: a
+                % retransmission of a TB already decoded must still be ACKed, or the
+                % transmitter keeps retransmitting something the receiver already has.
+                if scen.isUnicast && ~strcmp(fb, 'none')
                     ue(i).psfchTx(end + 1) = struct( ...
                         'slot',       phy.ts38213.psfchTiming(nLog, scen.minTimeGapPsfch, scen.slPsfchPeriod), ...
                         'toUeId',     air(k).ueId, ...
-                        'ack',        gotTb, ...
+                        'ack',        strcmp(fb, 'ack'), ...
                         'procIdx',    air(k).harqId + 1, ...
                         'psschSlot',  nLog, ...
                         'startSubch', air(k).startSubch, ...

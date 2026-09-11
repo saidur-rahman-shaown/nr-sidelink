@@ -272,5 +272,54 @@ kOff = harness.sls.runScenario(off, slotsPre);
 assert(kOff.nPreempt == 0, 'with sl-PreemptionEnable absent nothing may be pre-empted, got %d', kOff.nPreempt);
 assert(kOff.nReeval == reevalBySeed(1), 'sl-PreemptionEnable must not affect re-evaluation: %d vs %d on the same seed', kOff.nReeval, reevalBySeed(1));
 
+%% ---- the real MAC receive path is wired, and delivery is EARNED --------
+% Delivery used to be credited from air(k).ctxIds on a successful decode. It now runs
+% mac.sciInterest -> mac.harqRxAssign -> mac.demuxSlSch -> mac.pduFilter -> mac.harqRxProcess,
+% so a PDU addressed to someone else is decoded and then NOT delivered.
+[kRx, ueRx, scRx] = harness.sls.run(10, 1000, 3);
+assert(kRx.nDelivered > 0, 'the wired receive path must still deliver packets');
+assert(isfield(ueRx(1), 'harqRx') && ueRx(1).harqRx.nProcesses > 0, 'each UE must hold a receive HARQ entity');
+% Every receive process must end a run unoccupied: clause 5.22.2.2.2 releases a process on the
+% first successful decode, whether or not the identity filter let the PDU through. A process
+% left occupied is one leaked to a neighbour this UE can hear but is not addressed by.
+for i = 1:numel(ueRx)
+    assert(~any(ueRx(i).harqRx.occupied), 'UE %d leaked %d receive processes', i, nnz(ueRx(i).harqRx.occupied));
+end
+assert(~scRx.isUnicast, 'this block assumes the broadcast scenario');
+
+%% ---- clause 5.22.2.2.1's INTEREST gate, and what omitting it costs -----
+% "Each Sidelink process is associated with SCI in which the MAC entity is interested." Without
+% that gate every neighbour allocates a process for every transmission it can hear AND answers
+% it on PSFCH, colliding with the addressed UE's feedback. Measured when it was missing: 8
+% spurious radio link failures in a 10-UE unicast run that should have had none.
+me = 7; peer = 3; bcast = 2^24 - 1;
+assert(mac.sciInterest(2, me, me, peer), 'a unicast addressed to this UE is of interest');
+assert(~mac.sciInterest(2, me + 1, me, peer), 'a unicast addressed elsewhere is not');
+assert(mac.sciInterest(0, bitand(bcast, 65535), me, bcast), 'a broadcast to a monitored address is of interest');
+assert(~mac.sciInterest(0, bitand(bcast, 65535) - 1, me, bcast), 'a broadcast to another group is not');
+% Unicast checks this UE's OWN source ids, groupcast/broadcast the destinations it monitors --
+% the same inversion mac.pduFilter applies, and getting it backwards makes a UE interested only
+% in its own transmissions.
+assert(~mac.sciInterest(2, bitand(bcast, 65535), me, bcast), 'unicast must not match against the monitored destination list');
+
+%% ---- unicast: feedback is generated, and no spurious RLF ---------------
+kUni = harness.sls.run(12, 1500, 3, 'unicast');
+assert(kUni.nDelivered > 0, 'unicast must deliver');
+assert(kUni.nRlf == 0, 'short unicast links must not declare radio link failure, got %d', kUni.nRlf);
+% ACKs must suppress retransmissions: with every link decoding first time, a delivered packet
+% costs one transmission, not two. That is the whole point of feedback over blind repetition.
+assert(kUni.txPerDelivery < 1.2, 'ACKs must suppress the blind retransmission, got %.2f transmissions per delivery', kUni.txPerDelivery);
+% ...and when links do fail, retransmissions must come back. A ratio pinned at 1.00 regardless
+% of range would mean feedback had silenced HARQ rather than driven it.
+sFar = harness.sls.scenarioInit(12, 3, 'unicast');
+sFar.spacingM = 300;
+sFar.posXY = [(0:sFar.nUe - 1)' * sFar.spacingM, zeros(sFar.nUe, 1)];
+cFar = harness.chanmodel.pathloss(sFar.radio.plModel, sFar.spacingM);
+sFar.policy.maxEscalations = ceil((sFar.pCmaxDbm - cFar - min(sFar.pool.thresholdListDbm)) / 3) + 1;
+kFar = harness.sls.runScenario(sFar, 1500);
+assert(kFar.txPerDelivery > kUni.txPerDelivery, ...
+    'a longer unicast link must need more transmissions per delivery: %.2f at 300 m vs %.2f at 20 m', ...
+    kFar.txPerDelivery, kUni.txPerDelivery);
+
 fprintf('test_sls: all assertions passed.\n');
 end

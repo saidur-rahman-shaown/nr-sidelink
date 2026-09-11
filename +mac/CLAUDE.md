@@ -388,3 +388,24 @@ Clause 5.22.2.2.2 tells the *physical layer* to combine. `harqRxProcess` returns
 flag rather than holding LLRs, because a normative package may not hold hidden state
 (`.claude/rules/normative-packages.md`) and a soft buffer is exactly that. The caller that owns
 the LLRs does the combining — the same split `+harness/+lls/linkHarq` makes on the transmit side.
+
+### `sciInterest` — clause 5.22.2.2.1's gate, and why it cannot be skipped
+"Each Sidelink process is associated with SCI **in which the MAC entity is interested**. This
+interest is determined by the Sidelink identification information of the SCI."
+
+It is tempting to skip this and let `pduFilter` reject unaddressed traffic after decoding — the
+PDU is discarded either way. It is **not** the same:
+- A receive process would be **allocated** for every transmission the UE can hear. In a dense
+  pool that exhausts the entity and starts dropping the TBs that *are* addressed to this UE
+  (NOTE 1), which reads as congestion.
+- **Feedback would be generated** for every one of them. Clause 5.22.2.2.2's feedback rules run
+  per Sidelink process, so an uninterested UE still transmits on its PSFCH resource — colliding
+  with the feedback of the UE that *is* addressed, whose transmitter then sees a DTX.
+
+Measured: wiring the receive path into `+harness/+sls/` without this gate produced **8 spurious
+radio link failures** in a 10-UE unicast run that should have had none, because every neighbour
+was answering every transmission. With the gate, zero.
+
+Note it is only the SCI-level half of the identity test — it matches the 16 LSB the SCI carries.
+`pduFilter` then joins that against the MAC subheader's high half once the PDU is decoded.
+Passing `sciInterest` means the PDU is worth decoding, not that it is for this UE.

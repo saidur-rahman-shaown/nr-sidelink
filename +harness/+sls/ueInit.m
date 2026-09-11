@@ -33,6 +33,12 @@ function u = ueInit(ueId, scen)
 %   .psfchTx         struct array of PSFCH this UE owes, one per PSSCH it decoded and must
 %                    acknowledge, scheduled at the slot psfchTiming picked
 %   .psfchWait       struct array of PSFCH this UE is expecting back for its own transmissions
+%   .harqRx          the RECEIVE-side HARQ entity, mac.harqRxInit. Sized at 16 processes:
+%                    TS 38.321 clause 5.22.2.2.1 defers the count to TS 38.306 (a UE
+%                    capability, no local PDF), and the receive side has no Mode-2 cap of 4 --
+%                    that cap is clause 5.22.1.3.1's and applies to TRANSMITTING processes only
+%   .ownSrcL2Id      1 x n integer -- this UE's own Source Layer-2 ID(s), for mac.pduFilter
+%   .ownDstL2Id      1 x m integer -- the Destination Layer-2 ID(s) it monitors
 %   .curTb .curCtx .curProc .curNdi  the transport block currently in the HARQ buffer, its
 %                    contexts, its Sidelink process and its NDI. Present and empty from the
 %                    start rather than added on first use: a struct array whose elements grow
@@ -76,7 +82,10 @@ u = struct( ...
     'curTb',         false(0, 1), ...
     'curCtx',        repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0), ...
     'curProc',       0, ...
-    'curNdi',        0);
+    'curNdi',        0, ...
+    'harqRx',        mac.harqRxInit(16), ...
+    'ownSrcL2Id',    ueId, ...
+    'ownDstL2Id',    ownDestinations(ueId, scen));
 end
 
 % =========================================================================
@@ -105,6 +114,18 @@ function t = psfchTxTemplate()
 %psfchTxTemplate One PSFCH this UE owes for a PSSCH it received.
 t = struct('slot', 0, 'toUeId', 0, 'ack', false, 'procIdx', 0, ...
            'psschSlot', 0, 'startSubch', 0, 'srcL1Id', 0);
+end
+
+function d = ownDestinations(ueId, scen)
+%ownDestinations The Destination Layer-2 ID(s) this UE monitors, for mac.pduFilter.
+%Broadcast: the all-ones address every UE listens to. Unicast: its peer's identity, which is
+%what the subheader's SRC field is matched against -- clause 5.22.2.2.2's check is CROSSED, so
+%the DESTINATION list holds peers' identities, not this UE's own.
+if scen.isUnicast
+    d = mod(ueId - 2, scen.nUe) + 1;      % the UE that transmits TO this one, in the ring
+else
+    d = 2^24 - 1;
+end
 end
 
 function t = psfchWaitTemplate()

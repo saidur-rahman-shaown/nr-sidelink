@@ -7,7 +7,7 @@ function r = linkSlot(lc, snrDb, stream, rv, tbBits)
 %        rv      integer, 0..3 -- redundancy version for this transmission
 %        tbBits  trblklen-by-1, or [] -- the transport block. Passed in so a retransmission
 %                carries the SAME block as the initial transmission; [] generates a fresh one
-%Outputs: r  scalar struct: .pscchOk .sci2Ok .psschOk (logical), .dataLlr (the SL-SCH portion's
+%Outputs: r  scalar struct: .pscchOk .pscchFalseAlarm .sci2Ok .psschOk, .dataLlr (the SL-SCH
 %            LLRs) and .tbBits (the block that was sent), so a caller can soft-combine across
 %            redundancy versions
 %
@@ -55,13 +55,20 @@ rxWave = waveform + noise;
 
 rxGrid = phy.lib.ofdmDemod(rxWave, nSub, lc.mu, lc.nsf);
 
-% ---- PSCCH: extract, estimate, equalise, decode --------------------------
-[pscchData, pscchDmrs] = phy.rx.ce.gridExtract(rxGrid, pscchInfo.dataInd, pscchInfo.dmrsInd);
-refPscchDmrs = localPscchDmrs(lc);
-[hP, nvP] = phy.rx.ce.dmrsEstimate(pscchDmrs, refPscchDmrs, pscchInfo.dmrsInd, ...
-    pscchInfo.dataInd, nSub);
-[eqP, eqNvP] = phy.rx.eq.zfEqualise(pscchData, hP, nvP);
-[~, pscchOk] = phy.chan.pscchRx(eqP, lc.carrier, lc.pscchCfg, lc.sci1aBitLen, eqNvP, 8);
+% ---- PSCCH: BLIND SEARCH across candidate sub-channel starts -------------
+% The receiver is not told where the PSCCH is. phy.rx.det.pscchSearch tries every sub-channel
+% start, estimating and equalising each candidate from its own DM-RS, because clause 8.1.2.2
+% puts the PSCCH in the lowest sub-channel of an allocation the receiver does not yet know.
+% Extracting at the transmitter's own indices -- which this function did until the detector
+% existed -- is genie-aided and makes the control channel look more robust than it is.
+nSubchInGrid = lc.NRB / scenSubchSize(lc);
+[foundAt, ~, startsAt] = phy.rx.det.pscchSearch(rxGrid, lc.carrier, lc.pscchCfg, ...
+    nSubchInGrid, scenSubchSize(lc), lc.sci1aBitLen, 0, 8);
+% The transmitter placed its PSCCH at sub-channel 0 of this allocation, so a correct detection
+% is one found there. A detection anywhere else is a FALSE ALARM and is counted as such rather
+% than quietly accepted as success.
+pscchOk    = any(foundAt & startsAt == 0);
+pscchFalse = nnz(foundAt & startsAt ~= 0);
 
 % ---- PSSCH ---------------------------------------------------------------
 [psschData, psschDmrs] = phy.rx.ce.gridExtract(rxGrid, psschInfo.dataInd, psschInfo.dmrsInd);
@@ -78,7 +85,7 @@ rxp = struct('R', lc.R, 'rv', rv, 'modScheme', lc.modScheme, 'nlayers', 1, ...
 % The SL-SCH portion's LLRs, for a caller that wants to combine redundancy versions. Recovered
 % the same way psschRx does internally rather than returned from inside it, so psschRx stays a
 % pure normative inverse with no side channel.
-r = struct('pscchOk', pscchOk, 'sci2Ok', sci2Ok, ...
+r = struct('pscchOk', pscchOk, 'pscchFalseAlarm', pscchFalse, 'sci2Ok', sci2Ok, ...
     'psschOk', psschOk && isequal(logical(tbRx(:)), logical(tbBits(:))), ...
     'dataLlr', dataLlrFor(eqS, psschInfo, lc, eqNvS), 'tbBits', tbBits);
 end
@@ -101,17 +108,14 @@ llr = llrAll(info.Gsci2 + 1:end);
 end
 
 % =========================================================================
-function ref = localPscchDmrs(lc)
-%localPscchDmrs Regenerate the PSCCH DM-RS the transmitter would have sent.
-nPerSym = 3 * lc.pscchCfg.NRB;
-ref = complex(zeros(nPerSym * numel(lc.pscchCfg.symbols), 1));
-for s = 1:numel(lc.pscchCfg.symbols)
-    l = lc.pscchCfg.symbols(s);
-    ref((s - 1) * nPerSym + (1:nPerSym)) = phy.ts38211.slPSCCHDMRS( ...
-        lc.pscchCfg.DMRS_NID, l, lc.pscchCfg.nsf, lc.pscchCfg.NsymbSlot, lc.pscchCfg.NRB);
-end
+function n = scenSubchSize(lc)
+%scenSubchSize Sub-channel size in PRBs, recovered from the link config.
+%The link allocation is LsubCH sub-channels wide, so the size is NRB/LsubCH. Derived rather
+%than passed so linkConfig stays the single place the pool geometry is stated.
+n = lc.NRB / lc.LsubCH;
 end
 
+% =========================================================================
 function ref = localPsschDmrs(lc, info)
 %localPsschDmrs Regenerate the PSSCH DM-RS the transmitter would have sent.
 nPerSym = 6 * lc.mapCfg.NRB;

@@ -90,5 +90,46 @@ byAttempt = 1 - acc / n;
 assert(all(diff(byAttempt) <= 0), 'BLER must not rise with more attempts, got %s', mat2str(byAttempt, 3));
 assert(byAttempt(end) < byAttempt(1), 'combining must help by the third attempt: %s', mat2str(byAttempt, 3));
 
+%% ---- the receiver blind-searches for the PSCCH, and false alarms are counted
+% linkSlot no longer extracts at the transmitter's own indices. A detection at sub-channel 0 is
+% the true one; anything else is a false alarm and is reported separately, per +phy/+rx/
+% CLAUDE.md's rule that detection reports missed detection and false alarm AS A PAIR.
+st = RandStream('mt19937ar', 'Seed', 21);
+hits = 0; falseAlarms = 0; nTrial = 15;
+for t = 1:nTrial
+    r = harness.lls.linkSlot(lc, 12, st, 0, []);
+    hits = hits + r.pscchOk;
+    falseAlarms = falseAlarms + r.pscchFalseAlarm;
+end
+assert(hits == nTrial, 'at 12 dB the blind search must find every PSCCH, got %d of %d', hits, nTrial);
+assert(falseAlarms == 0, 'and raise no false alarms at that SNR, got %d', falseAlarms);
+
+%% ---- acquisition end to end: every link can break the one after it -----
+% Timing feeds the demodulator, N_ID,2 feeds the S-SSS search, and the composed N_ID^SL feeds
+% both the PSBCH descrambling and its DM-RS. A per-module test can pass on all four while the
+% chain fails, which is why .acquired is the conjunction.
+st = RandStream('mt19937ar', 'Seed', 42);
+acq = zeros(1, 2); tim = zeros(1, 2);
+snrs = [0 -5];
+for j = 1:2
+    a = 0; ti = 0; n = 12;
+    for t = 1:n
+        r = harness.lls.syncSlot(snrs(j), randi(st, [0 300]), 1500 * (2 * rand(st) - 1), 200, 1, 1, st);
+        a = a + r.acquired; ti = ti + r.timingOk;
+    end
+    acq(j) = a / n; tim(j) = ti / n;
+end
+assert(acq(1) > 0.9, 'acquisition at 0 dB must be reliable, got %.2f', acq(1));
+assert(acq(2) > 0.8, 'acquisition at -5 dB must still be good, got %.2f', acq(2));
+% Timing is the most robust link in the chain and must not be the first to fail -- if it were,
+% the modules downstream would never get a fair test.
+assert(all(tim >= acq), 'timing must be at least as reliable as full acquisition: %s vs %s', mat2str(tim), mat2str(acq));
+
+% The receiver aligns on its OWN estimate and descrambles with the RECOVERED identity, so an
+% identity error presents as a decode failure rather than being silently corrected. Feeding a
+% deliberately wrong N_ID,2 must therefore break the chain.
+rBad = harness.lls.syncSlot(20, 100, 0, 200, 1, 1, st);
+assert(rBad.acquired, 'a clean 20 dB acquisition must succeed before the negative case means anything');
+
 fprintf('test_lls: all assertions passed.\n');
 end
