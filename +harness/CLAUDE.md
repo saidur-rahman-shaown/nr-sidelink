@@ -406,7 +406,16 @@ caller changes. `scen.radio.plModel` carries the descriptor; the loose `plExpone
 | Model | Source |
 |---|---|
 | `rma` | TR 38.901 clause 7.4.1 Table 7.4.1-1, via the 5G Toolbox's `nrPathLoss` |
-| `logdistance` | none — the hand-rolled placeholder it replaced, kept for comparison |
+
+**The hand-rolled `logdistance` placeholder has been removed**, not deprecated. It was never the
+default once RMa landed, but it remained *selectable* — and a placeholder that can still be
+chosen is one that will eventually be chosen, most likely by a scenario copied from an older
+one. The only path through `pathlossModel` is now a 3GPP model. The dispatcher stays with one
+model behind it: its job is the module boundary, not the choice, and TR 37.885's V2V models
+will be one implementation file and one `case`.
+
+The comparison figures below are kept as a record of what the change was worth; the
+`logdistance` row cannot be reproduced without restoring the deleted file.
 
 There is no TR 38.901 PDF in `Documentations/`, so the model is taken from the toolbox rather
 than transcribed from recall — the same discipline `+cfg/pqiTable.m` applies to its TS 23.287

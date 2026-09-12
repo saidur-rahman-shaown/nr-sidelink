@@ -19,8 +19,6 @@ if any(dMetres(:) < 0)
 end
 
 switch model.name
-    case 'logdistance'
-        pl = harness.chanmodel.pathlossLogDistance(dMetres, model.fcHz, model.exponent, model.refDistM);
     case 'rma'
         pl = harness.chanmodel.pathlossRma(dMetres, model.fcHz, model.losMode, model.hTxM, model.hRxM);
     otherwise

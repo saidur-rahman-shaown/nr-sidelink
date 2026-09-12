@@ -1,14 +1,10 @@
 function model = pathlossModel(name, p)
 %pathlossModel Build a path loss model descriptor. THE ENTRY POINT for choosing a model.
 %Spec:   none itself. Each implementation cites its own source; see the table below.
-%Inputs: name  char, one of:
-%                'logdistance' -- the log-distance placeholder, no spec behind it
-%                'rma'         -- TR 38.901 Rural Macro, via harness.chanmodel.pathlossRma
+%Inputs: name  char. Currently one model:
+%                'rma' -- TR 38.901 Rural Macro, via harness.chanmodel.pathlossRma
 %        p     scalar struct of parameters. Common to every model:
 %                .fcHz     real, >0 -- carrier frequency
-%              'logdistance' also takes:
-%                .exponent  real, >0 -- path loss exponent
-%                .refDistM  real, >0 -- free-space reference distance
 %              'rma' also takes:
 %                .losMode  char, 'los' or 'nlos'
 %                .hTxM     real, >0 -- transmitter height, metres
@@ -22,6 +18,18 @@ function model = pathlossModel(name, p)
 %implementation directly, and no implementation is reachable except through these two. Adding a
 %model -- TR 37.885's V2V Urban and Highway are the ones that actually belong in a sidelink
 %study -- means adding one implementation file and one case below, and touching no caller.
+%
+%THE LOG-DISTANCE PLACEHOLDER IS GONE, ON PURPOSE
+%--------------------------------------------------
+%A hand-rolled `logdistance` model (a free-space anchor plus an exposed exponent) lived here
+%while no standards model was available. It was never the default once RMa landed, but it
+%remained SELECTABLE -- and a placeholder that can still be chosen is a placeholder that will
+%eventually be chosen, most likely by a future scenario copied from an old one. It was removed
+%rather than deprecated so that the only path through this function is a 3GPP model.
+%
+%The dispatcher stays even with one model behind it. Its job is the module boundary, not the
+%choice: TR 37.885's V2V Urban and Highway are the models a sidelink study should eventually
+%use, and adding one means one implementation file and one case here, with no caller touched.
 %
 %The descriptor is a plain struct, not an object or a function handle, so a scenario
 %serialises and diffs whole. A run that cannot be reproduced from its recorded configuration is
@@ -38,19 +46,6 @@ model.name = name;
 model.fcHz = p.fcHz;
 
 switch name
-    case 'logdistance'
-        req = {'exponent', 'refDistM'};
-        for k = 1:numel(req)
-            if ~isfield(p, req{k})
-                error('chanmodel:pathlossModel:missingParam', 'pathlossModel: ''logdistance'' needs p.%s', req{k});
-            end
-        end
-        if ~(p.exponent > 0) || ~(p.refDistM > 0)
-            error('chanmodel:pathlossModel:badLogDistance', 'pathlossModel: exponent and refDistM must be > 0');
-        end
-        model.exponent = p.exponent;
-        model.refDistM = p.refDistM;
-
     case 'rma'
         req = {'losMode', 'hTxM', 'hRxM'};
         for k = 1:numel(req)
@@ -69,6 +64,6 @@ switch name
         model.hRxM    = p.hRxM;
 
     otherwise
-        error('chanmodel:pathlossModel:unknownModel', 'pathlossModel: no model named ''%s''; known models are ''logdistance'' and ''rma''', name);
+        error('chanmodel:pathlossModel:unknownModel', 'pathlossModel: no model named ''%s''; the only model is ''rma''. The log-distance placeholder was removed deliberately -- see this function''s header', name);
 end
 end
