@@ -7,6 +7,9 @@ throughput** end-to-end, from logical channels at the MAC SAP down through PHY, 
 and back up at the receiver.
 
 ## Read these first
+- `README.md` — orientation for a new reader: what the repo is, the packet flow from generation
+  to reception, where to modify, how to run a simulation. Start there if you have not seen the
+  tree before; this file is the working rules, not the tour.
 - `BUILD.md` — the master build sequence B0…B11, the gate for each package, and the dependency
   graph. This is the plan of record for the *packages*.
 - `INTEGRATION.md` — the plan of record for the *connections between them*: the frozen SAPs, the
