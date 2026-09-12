@@ -70,38 +70,38 @@ mustError(@() mac.pduFilter(4, 0, 0, 0, 0, me, peer, 4, false), 'mac:pduFilter:b
 h = mac.harqRxInit(4);
 % A first reception is a new transmission whatever the NDI, so a receiver joining mid-stream
 % does not wait for a toggle.
-[h, p1, new1] = mac.harqRxAssign(h, 77, 5000, 3, 0);
+[h, p1, new1] = mac.harqRxAssign(h, 77, 5000, 3, 0, 0, 1000);
 assert(p1 >= 1 && new1, 'the first reception for a triple must be a new transmission');
 % Same triple, same NDI: a retransmission on the same process.
-[h, p2, new2] = mac.harqRxAssign(h, 77, 5000, 3, 0);
+[h, p2, new2] = mac.harqRxAssign(h, 77, 5000, 3, 0, 0, 1000);
 assert(p2 == p1 && ~new2, 'an unchanged NDI on a known triple is a retransmission on the same process');
 % Same triple, toggled NDI: a new TB, same process re-allocated.
-[h, p3, new3] = mac.harqRxAssign(h, 77, 5000, 3, 1);
+[h, p3, new3] = mac.harqRxAssign(h, 77, 5000, 3, 1, 0, 1000);
 assert(new3, 'a toggled NDI must start a new transmission');
 % A DIFFERENT peer on the SAME Sidelink process ID must get its own process. Keying on the
 % process number alone would share a soft buffer between two peers, so one peer's
 % retransmission is combined into another's TB and decodes to noise.
 hh = mac.harqRxInit(4);
-[hh, a, ~] = mac.harqRxAssign(hh, 77, 5000, 3, 0);
-[hh, b, ~] = mac.harqRxAssign(hh, 88, 5000, 3, 0);
-[hh, c, ~] = mac.harqRxAssign(hh, 77, 6000, 3, 0);
+[hh, a, ~] = mac.harqRxAssign(hh, 77, 5000, 3, 0, 0, 1000);
+[hh, b, ~] = mac.harqRxAssign(hh, 88, 5000, 3, 0, 0, 1000);
+[hh, c, ~] = mac.harqRxAssign(hh, 77, 6000, 3, 0, 0, 1000);
 assert(numel(unique([a b c])) == 3, 'src, dst and process id are all part of the key: got processes %d %d %d', a, b, c);
 % Exhausting the processes is a drop, reported as a value (NOTE 1 leaves it to implementation).
 hFull = mac.harqRxInit(1);
-[hFull, ~, ~] = mac.harqRxAssign(hFull, 1, 1, 0, 0);
-[~, pNone, ~] = mac.harqRxAssign(hFull, 2, 2, 1, 0);
+[hFull, ~, ~] = mac.harqRxAssign(hFull, 1, 1, 0, 0, 0, 1000);
+[~, pNone, ~] = mac.harqRxAssign(hFull, 2, 2, 1, 0, 0, 1000);
 assert(pNone == 0, 'with no free process the TB must be dropped, reported as procIdx 0');
-mustError(@() mac.harqRxAssign(h, 1, 1, 0, 2), 'mac:harqRxAssign:badNdi', 'a non-binary NDI');
-mustError(@() mac.harqRxAssign(h, 1, 1, 16, 0), 'mac:harqRxAssign:badHarqId', 'a process id above the 4-bit SCI field');
+mustError(@() mac.harqRxAssign(h, 1, 1, 0, 2, 0, 1000), 'mac:harqRxAssign:badNdi', 'a non-binary NDI');
+mustError(@() mac.harqRxAssign(h, 1, 1, 16, 0, 0, 1000), 'mac:harqRxAssign:badHarqId', 'a process id above the 4-bit SCI field');
 
 %% ---- harqRxProcess: deliver once, acknowledge always -------------------
 h = mac.harqRxInit(2);
-[h, p, new] = mac.harqRxAssign(h, 77, 5000, 3, 0);
-[h, dl, fb, cmb] = mac.harqRxProcess(h, p, new, false, true, 2, true, true);
+[h, p, new] = mac.harqRxAssign(h, 77, 5000, 3, 0, 0, 1000);
+[h, dl, fb, cmb] = mac.harqRxProcess(h, p, new, false, true, 2, true, true, 0);
 assert(~dl && strcmp(fb, 'nack') && ~cmb, 'a failed first attempt: no delivery, a NACK, nothing to combine');
 assert(h.softValid(p) && h.occupied(p), 'a failed attempt must leave the soft buffer and keep the process');
-[h, p, new] = mac.harqRxAssign(h, 77, 5000, 3, 0);
-[h, dl, fb, cmb] = mac.harqRxProcess(h, p, new, true, true, 2, true, true);
+[h, p, new] = mac.harqRxAssign(h, 77, 5000, 3, 0, 0, 1000);
+[h, dl, fb, cmb] = mac.harqRxProcess(h, p, new, true, true, 2, true, true, 0);
 assert(dl && strcmp(fb, 'ack') && cmb, 'a successful retransmission must combine, deliver and ACK');
 assert(~h.occupied(p), 'a completed TB must leave the process unoccupied');
 
@@ -109,27 +109,73 @@ assert(~h.occupied(p), 'a completed TB must leave the process unoccupied');
 % must still be acknowledged, and must free its process. Holding the process open would leak
 % one to every neighbour this UE can hear but is not addressed by.
 h = mac.harqRxInit(2);
-[h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0);
-[h, dl, fb] = mac.harqRxProcess(h, p, new, true, false, 2, true, true);
+[h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0, 0, 1000);
+[h, dl, fb] = mac.harqRxProcess(h, p, new, true, false, 2, true, true, 0);
 assert(~dl && strcmp(fb, 'ack'), 'a decoded but unaddressed PDU is acknowledged, not delivered');
 assert(~h.occupied(p), 'and its process must be released');
 
 %% ---- feedback rules, per cast type -------------------------------------
 % Broadcast never generates feedback, even if the SCI flag were set.
-h = mac.harqRxInit(2); [h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0);
-[~, ~, fbB] = mac.harqRxProcess(h, p, new, false, true, 0, true, true);
+h = mac.harqRxInit(2); [h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0, 0, 1000);
+[~, ~, fbB] = mac.harqRxProcess(h, p, new, false, true, 0, true, true, 0);
 assert(strcmp(fbB, 'none'), 'broadcast must never generate feedback, got %s', fbB);
 % Feedback disabled by the SCI: silence whatever the cast type.
-h = mac.harqRxInit(2); [h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0);
-[~, ~, fbD] = mac.harqRxProcess(h, p, new, false, true, 2, false, true);
+h = mac.harqRxInit(2); [h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0, 0, 1000);
+[~, ~, fbD] = mac.harqRxProcess(h, p, new, false, true, 2, false, true, 0);
 assert(strcmp(fbD, 'none'), 'a disabled feedback flag must silence the receiver, got %s', fbD);
 % NACK-only groupcast: silence on success, NACK only on failure AND in range. A receiver that
 % ACKed here would transmit on a PSFCH resource the scheme does not allocate to it.
 for tc = {{true, true, 'none'}, {false, true, 'nack'}, {false, false, 'none'}, {true, false, 'none'}}
-    h = mac.harqRxInit(2); [h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0);
-    [~, ~, fbG] = mac.harqRxProcess(h, p, new, tc{1}{1}, true, 3, true, tc{1}{2});
+    h = mac.harqRxInit(2); [h, p, new] = mac.harqRxAssign(h, 1, 2, 0, 0, 0, 1000);
+    [~, ~, fbG] = mac.harqRxProcess(h, p, new, tc{1}{1}, true, 3, true, tc{1}{2}, 0);
     assert(strcmp(fbG, tc{1}{3}), 'NACK-only groupcast, decoded=%d inRange=%d: expected %s, got %s', tc{1}{1}, tc{1}{2}, tc{1}{3}, fbG);
 end
+
+%% ---- duplicate suppression, and the window that makes it safe ----------
+% A blind retransmission's second copy must not be delivered again (clause 5.22.2.2.1 NOTE 1a).
+h = mac.harqRxInit(4);
+[h, pA, nA] = mac.harqRxAssign(h, 7, 500, 2, 0, 10, 1000);
+[h, dA] = mac.harqRxProcess(h, pA, nA, true, true, 0, false, true, 10);
+assert(dA, 'the first copy must be delivered');
+[~, pDup, ~, whyDup] = mac.harqRxAssign(h, 7, 500, 2, 0, 20, 1000);
+assert(pDup == 0 && strcmp(whyDup, 'duplicate'), 'a repeat of a decoded TB must be discarded, got proc %d reason ''%s''', pDup, whyDup);
+
+% THE WINDOW IS NOT OPTIONAL. The key (srcId, dstId, harqId, ndi) has only nProcesses x 2
+% values per peer, so a transmitter cycling 4 processes with a toggling NDI repeats it every
+% EIGHT transport blocks. An unbounded memory therefore rejects genuinely new TBs forever.
+% Measured when the window was missing: unicast delivery stopped dead at 8 packets per UE and
+% every packet after that expired -- 160 delivered, 220 expired, over a run that should have
+% delivered nearly 400. Nothing in the suite caught it, because no test ran long enough.
+[~, pLater, ~, whyLater] = mac.harqRxAssign(h, 7, 500, 2, 0, 2000, 1000);
+assert(pLater > 0 && isempty(whyLater), 'the same key OUTSIDE the window is a new TB, not a duplicate, got proc %d reason ''%s''', pLater, whyLater);
+
+% A duplicate must still be ACKNOWLEDGED. Clause 5.22.2.2.2 enters its feedback block on
+% "successfully decoded BEFORE" as well as now: only DELIVERY is once-only. Silence here makes
+% the transmitter read a DTX and retransmit what the receiver already has, and clause
+% 5.22.1.3.3 counts consecutive DTX toward radio link failure.
+assert(strcmp(mac.harqRxDuplicateFeedback(2, true), 'ack'), 'a duplicate unicast TB must be ACKed');
+assert(strcmp(mac.harqRxDuplicateFeedback(1, true), 'ack'), 'a duplicate ACK/NACK groupcast TB must be ACKed');
+assert(strcmp(mac.harqRxDuplicateFeedback(3, true), 'none'), 'NACK-only groupcast stays silent on success, duplicate or not');
+assert(strcmp(mac.harqRxDuplicateFeedback(0, true), 'none'), 'broadcast never generates feedback');
+assert(strcmp(mac.harqRxDuplicateFeedback(2, false), 'none'), 'a disabled feedback flag silences the receiver');
+
+%% ---- harqRxAge: a failed reception must not hold its process forever ----
+% Clause 5.22.2.2.2 releases a process only on SUCCESS. A TB that never decodes would keep its
+% process and soft buffer indefinitely; measured before this existed, the worst UE held 16 of
+% 16 processes at 50 UEs and 91% of the pool was occupied at 80 UEs, after which harqRxAssign
+% drops TBs that WOULD have decoded.
+hAge = mac.harqRxInit(2);
+[hAge, pF, nF] = mac.harqRxAssign(hAge, 1, 2, 0, 0, 100, 1000);
+[hAge] = mac.harqRxProcess(hAge, pF, nF, false, false, 0, false, true, 100);
+assert(hAge.occupied(pF) && hAge.softValid(pF), 'a failed decode must keep the process and its soft buffer');
+[~, relEarly] = mac.harqRxAge(hAge, 100 + 50, 50);
+assert(relEarly == 0, 'a process must NOT be released at exactly the bound -- its retransmission may still be in flight');
+[hFree, relLate] = mac.harqRxAge(hAge, 100 + 51, 50);
+assert(relLate == 1 && ~hFree.occupied(pF), 'a process idle past the bound must be released');
+% Releasing must clear the soft buffer too, or a later TB combines against stale data.
+assert(~hFree.softValid(pF), 'releasing a process must flush its soft buffer');
+mustError(@() mac.harqRxAge(hAge, -1, 50), 'mac:harqRxAge:badSlot', 'a negative slot');
+mustError(@() mac.harqRxAge(hAge, 100, 0), 'mac:harqRxAge:badStale', 'a zero staleness bound');
 
 fprintf('test_macRx: all assertions passed.\n');
 end

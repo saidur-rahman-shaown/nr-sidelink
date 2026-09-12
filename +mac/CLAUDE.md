@@ -409,3 +409,52 @@ was answering every transmission. With the gate, zero.
 Note it is only the SCI-level half of the identity test — it matches the 16 LSB the SCI carries.
 `pduFilter` then joins that against the MAC subheader's high half once the PDU is decoded.
 Passing `sciInterest` means the PDU is worth decoding, not that it is for this UE.
+
+
+### Four bugs in the receive path, found by asking "do we have any bugs now"
+All four were in code that passed the whole suite. Recorded with their measurements because
+each has a quiet signature.
+
+1. **A duplicate was delivered twice.** The process is released on the first successful decode,
+   so the second copy of a blind retransmission finds no association, is treated as a new
+   transmission, and is handed up again. Clause 5.22.2.2.1 NOTE 1a covers the case and leaves
+   it to implementation; delivering a duplicate is the wrong answer. Fixed with the `done*`
+   ring in `harqRxInit`.
+
+2. **A failed reception held its process forever.** Clause 5.22.2.2.2 releases a process only
+   on SUCCESS. Measured at 2000 slots, worst single UE: 4 of 16 processes at 20 UEs, **16 of 16
+   at 50**, and 91% of the pool occupied at 80. Past exhaustion `harqRxAssign` drops TBs that
+   would have decoded — reception degrading with density, which reads as congestion rather than
+   as a receiver out of state. Fixed with `mac.harqRxAge`.
+
+3. **The duplicate was then not ACKed.** Fixing (1) silenced the receiver, but clause 5.22.2.2.2
+   enters its feedback block on "successfully decoded **before**" as well as now — only
+   *delivery* is once-only. Without the ACK the transmitter reads a DTX and retransmits what the
+   receiver already has, and clause 5.22.1.3.3 counts consecutive DTX toward radio link failure.
+   Fixed with `mac.harqRxDuplicateFeedback`. (1) and (3) are only correct together.
+
+4. **The duplicate ring had no time window — and this halted unicast entirely.** The key
+   `(srcId, dstId, harqId, ndi)` has only `nProcesses × 2` values per peer, so a transmitter
+   cycling four processes with a toggling NDI repeats it every **eight** transport blocks. The
+   ring then holds every combination and rejects genuinely new TBs as duplicates, permanently.
+   Measured: unicast delivery stopped dead at 160 packets (8 per UE); at 4000 slots it was
+   *still* 160 while expiries climbed to 220. **The entire suite passed**, because no test ran a
+   unicast scenario past the eighth packet per UE.
+
+The lesson from (4) is the one worth keeping: the fix for (1) introduced a worse failure than
+(1) itself, and only a run longer than any test exposed it. `test_sls` now checks the unicast
+delivery ratio at 2000, 4000 and 8000 slots and asserts it does not *degrade* with length —
+a stall is invisible at any single length.
+
+### Sizing the staleness bound
+`harqRxAge`'s bound is derived from how long one TB's transmissions can legitimately span, and
+that differs by cast type — as does how many peers hold processes, in the opposite direction:
+
+| | legitimate span | peers allocating processes |
+|---|---|---|
+| broadcast | all copies chained to one SCI: ≤ 31 slots (TRIV's reach) | every audible neighbour |
+| unicast | a NACK-driven retx lands a period later: ≤ `sl-MaxTransNum` periods | only the addressed peer |
+
+So the case needing the SHORT bound is exactly the case with many peers. One bound for both was
+wrong: at 50 UEs broadcast the worst UE held 16 of 16 processes at a 1600-slot bound, 15 of 16
+at 400, and 6 of 16 at 200 (one reservation period, six times the chained span).

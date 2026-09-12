@@ -126,6 +126,14 @@ end
     scen.radio, scen.numSubchannel, scen.pscchPrb, scen.subchSizeRb);
 
 % ---- 7. RX ----------------------------------------------------------------
+% Release receive processes whose reception has stopped advancing, BEFORE this slot's
+% receptions ask for one. Clause 5.22.2.2.2 releases a process only on a successful decode, so
+% a transport block that never decodes would hold its process forever -- measured at 50 UEs,
+% every one of a UE's 16 processes occupied, after which harqRxAssign drops TBs that would have
+% decoded. The bound must exceed the longest legitimate gap between one TB's transmissions.
+for i = 1:nUe
+    ue(i).harqRx = mac.harqRxAge(ue(i).harqRx, nLog, scen.rxProcStaleSlots);
+end
 isTx = false(1, nUe);
 for k = 1:numel(air)
     isTx(air(k).ueId) = true;
@@ -198,10 +206,20 @@ for i = 1:nUe
                 % in a 10-UE unicast run that should have had none.
                 rxProc = 0;
                 fb = 'none';
+                dropWhy = '';
                 if mac.sciInterest(air(k).castType, mod(air(k).dstL2Id, 65536), ...
                         ue(i).ownSrcL2Id, ue(i).ownDstL2Id)
-                    [ue(i).harqRx, rxProc, rxIsNew] = mac.harqRxAssign(ue(i).harqRx, ...
-                        mod(air(k).srcL2Id, 256), mod(air(k).dstL2Id, 65536), air(k).harqId, air(k).ndi);
+                    [ue(i).harqRx, rxProc, rxIsNew, dropWhy] = mac.harqRxAssign(ue(i).harqRx, ...
+                        mod(air(k).srcL2Id, 256), mod(air(k).dstL2Id, 65536), air(k).harqId, ...
+                        air(k).ndi, nLog, scen.rxProcStaleSlots);
+                end
+                % A repeat of a TB already decoded is not delivered again, but it must still be
+                % ACKed: clause 5.22.2.2.2 enters its feedback block on "successfully decoded
+                % BEFORE" as well as now. Suppressing the duplicate without this makes the
+                % transmitter see a DTX and retransmit what the receiver already has -- and
+                % clause 5.22.1.3.3 counts consecutive DTX toward radio link failure.
+                if strcmp(dropWhy, 'duplicate')
+                    fb = mac.harqRxDuplicateFeedback(air(k).castType, air(k).harqFeedbackEnabled == 1);
                 end
                 if rxProc > 0
                     passes = false;
@@ -212,7 +230,7 @@ for i = 1:nUe
                             ue(i).ownSrcL2Id, ue(i).ownDstL2Id, sduLcid, false);
                     end
                     [ue(i).harqRx, doDeliver, fb] = mac.harqRxProcess(ue(i).harqRx, rxProc, ...
-                        rxIsNew, gotTb, passes, air(k).castType, air(k).harqFeedbackEnabled == 1, true);
+                        rxIsNew, gotTb, passes, air(k).castType, air(k).harqFeedbackEnabled == 1, true, nLog);
                     if doDeliver
                         [ue, resolved] = deliver(ue, resolved, air(k), nPhys, codes);
                     end

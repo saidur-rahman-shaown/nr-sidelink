@@ -321,5 +321,41 @@ assert(kFar.txPerDelivery > kUni.txPerDelivery, ...
     'a longer unicast link must need more transmissions per delivery: %.2f at 300 m vs %.2f at 20 m', ...
     kFar.txPerDelivery, kUni.txPerDelivery);
 
+%% ---- a LONG unicast run: delivery must keep up, not stall -------------
+% This is the test that was missing. A duplicate-suppression memory keyed on
+% (srcId, dstId, harqId, ndi) with no time window rejects genuinely new transport blocks once
+% the key wraps -- after nProcesses x 2 = 8 TBs per peer. Unicast delivery stopped dead at 160
+% packets and every later one expired, and the whole suite still passed, because no test ran a
+% unicast scenario past the eighth packet per UE.
+%
+% Delivery ratio is checked at THREE lengths: a stall shows up as a ratio that falls as the run
+% grows, which no single-length test can see.
+lens = [2000 4000 8000];
+ratio = zeros(1, 3);
+for j = 1:3
+    kL = harness.sls.run(20, lens(j), 9, 'unicast');
+    ratio(j) = kL.nDelivered / kL.nGenerated;
+    assert(kL.nDelivered + kL.nExpired + kL.nInFlight == kL.nGenerated, ...
+        'conservation must hold at %d slots', lens(j));
+end
+assert(all(ratio > 0.95), 'unicast delivery must stay high at every run length, got %s', mat2str(ratio, 3));
+assert(ratio(3) >= ratio(1) - 0.05, ...
+    'delivery must NOT degrade as the run lengthens: %.3f at %d slots vs %.3f at %d -- that is the signature of state that fills up and never drains', ...
+    ratio(3), lens(3), ratio(1), lens(1));
+
+%% ---- receive processes must stay bounded as density rises -------------
+% A TB that never decodes holds its process forever unless something releases it. The failure
+% is silent and grows with density: once the entity is full, TBs that WOULD have decoded are
+% dropped, which reads as congestion rather than as a receiver out of state.
+for n = [20 50 80]
+    [~, ueD] = harness.sls.run(n, 1500, 9);
+    worst = 0;
+    for i = 1:numel(ueD)
+        worst = max(worst, nnz(ueD(i).harqRx.occupied));
+    end
+    cap = ueD(1).harqRx.nProcesses;
+    assert(worst < cap, 'at %d UEs the worst UE holds %d of %d receive processes -- the entity is exhausted and dropping TBs', n, worst, cap);
+end
+
 fprintf('test_sls: all assertions passed.\n');
 end

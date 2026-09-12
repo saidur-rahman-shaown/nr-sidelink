@@ -1,4 +1,4 @@
-function [h, deliver, feedback, combine] = harqRxProcess(h, procIdx, isNewTx, decodedOk, passesFilter, castType, feedbackEnabled, inCommRange)
+function [h, deliver, feedback, combine] = harqRxProcess(h, procIdx, isNewTx, decodedOk, passesFilter, castType, feedbackEnabled, inCommRange, nowSlot)
 %harqRxProcess Act on one received TB: deliver, buffer, and decide feedback. Clause 5.22.2.2.2.
 %Spec:   TS 38.321 V16.22.0, clause 5.22.2.2.2 (Sidelink process), including its HARQ feedback
 %        generation rules. The delivery IDENTITY test is mac.pduFilter's; its verdict arrives
@@ -16,6 +16,8 @@ function [h, deliver, feedback, combine] = harqRxProcess(h, procIdx, isNewTx, de
 %                         communication range requirement, or has no location information, or
 %                         the SCI indicated no zone. Clause 5.22.2.2.2 treats all three the
 %                         same way, so they are collapsed into one flag by the caller
+%        nowSlot          integer, >=0 -- current logical pool slot, stamped into the
+%                         completed-reception ring so its entries can expire
 %Outputs: h         updated entity
 %         deliver   logical -- hand the PDU to disassembly and demultiplexing
 %         feedback  char -- 'none', 'ack' or 'nack', what to tell the physical layer to send
@@ -67,8 +69,18 @@ if decodedOk || alreadyDecoded
     % or not the identity check let it through. A PDU that failed the filter was still received
     % correctly; holding the process open for it would leak processes to every neighbour whose
     % traffic this UE can hear but is not addressed by.
+    % Record the completed reception before releasing, so a later repeat of the same TB is
+    % recognised as a duplicate rather than treated as a new transmission and delivered twice.
+    h.doneCursor = mod(h.doneCursor, h.nProcesses) + 1;
+    h.doneSrc(h.doneCursor)  = h.srcId(procIdx);
+    h.doneDst(h.doneCursor)  = h.dstId(procIdx);
+    h.doneHarq(h.doneCursor) = h.harqId(procIdx);
+    h.doneNdi(h.doneCursor)  = h.lastNdi(procIdx);
+    h.doneSlot(h.doneCursor) = nowSlot;
+
     h.softValid(procIdx) = false;
     h.occupied(procIdx)  = false;
+    h.lastSlot(procIdx)  = -1;
 else
     % "instruct the physical layer to replace the data in the soft buffer with the data which
     % the MAC entity attempted to decode".

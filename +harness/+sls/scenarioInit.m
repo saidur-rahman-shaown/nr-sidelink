@@ -139,6 +139,28 @@ scen.psfchNumMuxCsPair = 6;              % sl-NumMuxCS-Pair, N_CS^PSFCH
 scen.psfchNtype        = 1;              % sl-PSFCH-CandidateResourceType = startSubCH
 scen.slMaxTransNum             = 1 + scen.policy.numRetx + 2;
 scen.slMaxNumConsecutiveDTX    = 4;
+% How long a receive Sidelink process may sit idle before it is released. A policy, not a clause
+% deadline (clause 5.22.2.2.1 NOTE 1) -- see mac.harqRxAge -- and DERIVED from how long one TB's
+% transmissions can legitimately span, which differs by cast type:
+%
+%   broadcast: every copy of a TB is CHAINED to the same SCI, so all of them fall within TRIV's
+%              reach of the anchor -- 31 logical slots. One reservation period is six times that
+%              and is what is used: generous without being loose.
+%   unicast:   a NACK-driven retransmission lands in a LATER reservation period, so the span
+%              runs to sl-MaxTransNum periods.
+%
+% The cast type also decides how many processes are under pressure, and it cuts the other way:
+% in broadcast every audible neighbour is "interesting" (mac.sciInterest passes them all), while
+% in unicast only the addressed peer is. The case needing the SHORT bound is exactly the case
+% with many peers -- which is why a single bound for both was wrong. Measured at 50 UEs
+% broadcast over 2000 slots, worst single UE: 16 of 16 processes occupied at a 1600-slot bound,
+% 15 of 16 at 400, and 6 of 16 at 200.
+periodSlots = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, 10240 * 2^scen.mu);
+if scen.isUnicast
+    scen.rxProcStaleSlots = scen.slMaxTransNum * periodSlots;
+else
+    scen.rxProcStaleSlots = periodSlots;
+end
 nReSci1 = scen.pscchSymbols * scen.pscchPrb * 12;   % PSCCH REs, from the fields above
 
 tbsBytesByLsubCH = zeros(1, scen.numSubchannel);
