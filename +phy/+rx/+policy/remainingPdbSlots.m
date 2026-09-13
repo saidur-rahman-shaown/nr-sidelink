@@ -1,4 +1,4 @@
-function [remaining, expired] = remainingPdbSlots(pdbMs, genSlot, currentSlot, mu)
+function [remaining, expired] = remainingPdbSlots(pdbMs, genSlot, currentSlot, mu, decodeMarginSlots)
 %remainingPdbSlots Packet delay budget still available at a slot, in slots.
 %Spec:   the PDB itself is TS 23.287 clause 5.4.4 Table 5.4.4-1 (PC5 QoS characteristics),
 %        surfaced by +cfg/pqiTable as PDB_ms. How much of it is left, and what to do when
@@ -10,6 +10,8 @@ function [remaining, expired] = remainingPdbSlots(pdbMs, genSlot, currentSlot, m
 %                     from creation, not from arrival at MAC.
 %        currentSlot  integer, >= genSlot -- the slot being evaluated
 %        mu           integer, 0..3 -- mu_SL, the SCS configuration of the SL BWP
+%        decodeMarginSlots  integer, >=0 -- slots reserved at the END of the budget for the
+%                     RECEIVER to decode. See below
 %Outputs: remaining  integer, >=0 -- budget left in **PHYSICAL** slots, clamped at 0. Physical
 %                    because a delay budget is wall clock. It must be converted to logical
 %                    pool slots by phy.rx.policy.pdbLogicalSlots before it can bound T2, which
@@ -24,6 +26,23 @@ function [remaining, expired] = remainingPdbSlots(pdbMs, genSlot, currentSlot, m
 %latency tail at the same time, in the same direction, so nothing downstream contradicts it.
 %The budget must be tested here, once, and acted on by the caller.
 %
+%THE DECODING MARGIN BELONGS TO THE BUDGET, NOT TO THE SELECTION WINDOW
+%------------------------------------------------------------------------
+%The PDB is a deadline for DELIVERY, not for transmission: a packet that leaves the transmitter
+%exactly at the deadline is late by however long the receiver takes to decode it. So the budget
+%available for *transmission* is the PDB minus a decoding allowance, and that subtraction is
+%made here rather than in phy.rx.policy.selectionWindow.
+%
+%Doing it here is not a matter of taste. Clause 8.1.4 permits T2 anywhere in
+%[T2min, remaining PDB] when T2min is the smaller, but forces T2 = remaining PDB EXACTLY when
+%T2min is larger -- so a margin subtracted inside selectionWindow would be illegal in the second
+%branch, and selectionWindow would need T2min as an input purely to know which branch it is in.
+%Subtracting from the budget instead leaves T2 = "the remaining PDB" as before: legal in both
+%branches with no test, which is the argument selectionWindow's header rests on.
+%
+%It also makes the EXPIRY point consistent for free: a packet with less budget left than the
+%decode margin can never be delivered in time, and sap.lchExpire drops it on the same call.
+%
 %Slots, not ms, because every window in clause 8.1.4 is in slots and the conversion is
 %numerology-dependent (x2^mu). floor(), not round(), since a partially-elapsed slot is not
 %usable: the budget covers whole transmission opportunities.
@@ -34,6 +53,9 @@ end
 if ~(mu >= 0 && mu <= 3 && mod(mu, 1) == 0)
     error('policy:remainingPdbSlots:badMu', 'remainingPdbSlots: mu must be an integer in 0..3, got %s', num2str(mu));
 end
+if ~(decodeMarginSlots >= 0 && mod(decodeMarginSlots, 1) == 0)
+    error('policy:remainingPdbSlots:badMargin', 'remainingPdbSlots: decodeMarginSlots must be a nonnegative integer, got %s', num2str(decodeMarginSlots));
+end
 if mod(genSlot, 1) ~= 0 || mod(currentSlot, 1) ~= 0
     error('policy:remainingPdbSlots:badSlot', 'remainingPdbSlots: genSlot and currentSlot must be integers');
 end
@@ -43,6 +65,7 @@ end
 
 pdbSlots  = floor(pdbMs * 2^mu);          % ms -> slots at this numerology
 elapsed   = currentSlot - genSlot;
-remaining = max(0, pdbSlots - elapsed);
+% The transmission deadline is the delivery deadline less the receiver's decoding time.
+remaining = max(0, pdbSlots - decodeMarginSlots - elapsed);
 expired   = (remaining == 0);
 end

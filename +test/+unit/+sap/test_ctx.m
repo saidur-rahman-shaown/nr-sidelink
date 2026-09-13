@@ -75,7 +75,7 @@ assert(cMax.srcL2Id == 2^24 - 1 && cMax.lcid == 63, 'ctxInit: the top of each fi
 t = cfg.pqiTable();
 row = t([t.PQI] == 55);
 cp  = sap.ctxInit(20, 1, 2, row.PQI, row.priority, row.PDB_ms, 300, 4, 0);
-[remaining, expired] = phy.rx.policy.remainingPdbSlots(cp.pdbMs, cp.tGenSlot, 0, 1);
+[remaining, expired] = phy.rx.policy.remainingPdbSlots(cp.pdbMs, cp.tGenSlot, 0, 1, 0);
 assert(remaining == 200 && ~expired, 'the context PDB and the policy must agree: expected 200 slots, got %d', remaining);
 [~, ~, feasible] = phy.rx.policy.selectionWindow(1, remaining);
 assert(feasible, 'a fresh PQI 55 packet must have a feasible selection window');

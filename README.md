@@ -23,11 +23,60 @@ two resolutions, and a test asserts they agree.
 
 ## Quick start
 
+**Edit one file, run one command.**
+
 ```matlab
 cd '.../nrSidelink'
 addpath(pwd)
 
-% One system-level run: 50 UEs, 4000 slots (2 s at mu=1), seed 7
+k = runSim();        % reads simConfig.m, runs it, plots latency and throughput
+```
+
+`simConfig.m` at the repo root is the only file you need to touch for an ordinary experiment.
+It defaults to the simplest useful case — **one unicast link, UE1 to UE2, 100 m apart** — and
+groups every knob by what it belongs to:
+
+| group | what it sets |
+|---|---|
+| `c.link` | how many UEs, how far apart, **which of them transmit**, unicast or broadcast |
+| `c.pool` | the TX/RX resource pool: sub-channels, sensing and selection windows, RSRP thresholds, PSFCH |
+| `c.app` | traffic: PQI, period, payload size, logical channel |
+| `c.policy` | MCS, reservation period, blind retransmissions, **decode margin** |
+| `c.radio` | carrier, noise figure, transmit power, LOS/NLOS, antenna heights |
+| `c.sim` | slots, seed, whether and where to plot |
+
+Override inline instead of editing, if you prefer:
+
+```matlab
+c = simConfig();
+c.link.spacingM = 400;
+c.app.sizeBytes = 190;
+k = runSim(c);
+```
+
+`c.link.txUeIds` is what makes a single link possible inside a populated pool: UEs not in that
+list still **receive and still sense**, they just do not generate traffic. They are silent
+neighbours, not absent ones.
+
+### T1 and T2
+**T1 is not a config field.** It is `T_proc,1^SL` from TS 38.214 Table 8.1.4-2 — **5 slots at
+30 kHz** — and the policy takes that floor exactly, because it is the earliest a conformant UE
+can prepare a transmission.
+
+**T2 = remaining PDB − `c.policy.decodeMarginSlots`** (default **2**). The PDB is a deadline for
+*delivery*, so a packet transmitted exactly at the deadline is late by however long the receiver
+takes to decode. The margin is subtracted from the **budget** rather than from T2 inside the
+window policy: clause 8.1.4 forces `T2 = remaining PDB` exactly when T2min is the larger of the
+two, so a margin applied there would be illegal in that branch. Taking it off the budget leaves
+T2 legal in both branches with no test — and moves the PDB *expiry* point with it for free, so
+a packet that could never be decoded in time is dropped rather than transmitted into a deadline
+it cannot meet.
+
+### The lower-level entry points
+`runSim` is a wrapper. The layers underneath are still there:
+
+```matlab
+% One system-level run, no config file: 50 UEs, 4000 slots (2 s at mu=1), seed 7
 k = harness.sls.run(50, 4000, 7);
 disp(k)
 
@@ -259,6 +308,8 @@ that cannot be reproduced exactly is not a result.
 | file | what it is for |
 |---|---|
 | `README.md` | this — orientation, flow, how to run |
+| `simConfig.m` | **the one file to edit** to define a scenario |
+| `runSim.m` | run that scenario and plot latency and throughput |
 | `CLAUDE.md` | the project guide: rules, layout, session pattern |
 | `BUILD.md` | the plan of record for **packages** — B0…B11 and their gates |
 | `INTEGRATION.md` | the plan of record for **connections** — the SAPs and phase order |

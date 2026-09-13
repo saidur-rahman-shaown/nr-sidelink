@@ -1,4 +1,4 @@
-function [lchSet, expired] = lchExpire(lchSet, nowPhys, mu)
+function [lchSet, expired] = lchExpire(lchSet, nowPhys, mu, decodeMarginSlots)
 %lchExpire Discard every queued SDU whose packet delay budget has run out.
 %Spec:   the PDB is TS 23.287 clause 5.4.4; the discard is not specified anywhere. TS 38.321
 %        has no sidelink discard timer (clause 5.22 has no analogue of the Uu
@@ -7,6 +7,9 @@ function [lchSet, expired] = lchExpire(lchSet, nowPhys, mu)
 %Inputs: lchSet   from +sap/lchInit
 %        nowPhys  integer -- current PHYSICAL slot
 %        mu       integer, 0..3 -- mu_SL
+%        decodeMarginSlots  integer, >=0 -- the receiver's decoding allowance, passed straight
+%                 through to phy.rx.policy.remainingPdbSlots so the discard point and the
+%                 selection-window feasibility point cannot drift apart
 %Outputs: lchSet   with the expired contexts removed from the queue
 %         expired  1 x nExpired struct array of contexts, each already resolved with
 %                  +sap/ctxFinish(.pdbExpired). Hand them to the KPI log; they are LOSSES.
@@ -32,7 +35,7 @@ nQ    = numel(lchSet.q);
 isDead = false(1, nQ);
 
 for k = 1:nQ
-    [~, dead] = phy.rx.policy.remainingPdbSlots(lchSet.q(k).pdbMs, lchSet.q(k).tGenSlot, nowPhys, mu);
+    [~, dead] = phy.rx.policy.remainingPdbSlots(lchSet.q(k).pdbMs, lchSet.q(k).tGenSlot, nowPhys, mu, decodeMarginSlots);
     isDead(k) = dead;
 end
 

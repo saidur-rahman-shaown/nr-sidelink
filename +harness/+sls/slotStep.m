@@ -57,7 +57,7 @@ periodLogical = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, scen
 
 % ---- 2. APP: generate, and cross the MAC SAP ------------------------------
 for i = 1:nUe
-    if app.trafficPeriodic(nPhys, scen.traffic.periodSlots, ue(i).trafficOffset)
+    if scen.txUeMask(i) && app.trafficPeriodic(nPhys, scen.traffic.periodSlots, ue(i).trafficOffset)
         c = sap.ctxInit(ue(i).nextPktId, ue(i).srcL2Id, ue(i).dstL2Id, scen.traffic.pqi, ...
             ue(i).prio, scen.traffic.pdbMs, scen.traffic.sizeBytes, scen.traffic.lcid, nPhys);
         ue(i).lch       = sap.lchEnqueue(ue(i).lch, c, nPhys);
@@ -84,13 +84,13 @@ end
 % every ratio. That is precisely the arithmetic that makes a reliability figure look better
 % than the run was, and it is invisible in a scenario where almost everything is delivered.
 for i = 1:nUe
-    [ue(i).lch, dead] = sap.lchExpire(ue(i).lch, nPhys, scen.mu);
+    [ue(i).lch, dead] = sap.lchExpire(ue(i).lch, nPhys, scen.mu, scen.decodeMarginSlots);
     resolved = [resolved dead];  %#ok<AGROW>
 
     stillFlying = true(1, numel(ue(i).inFlight));
     for f = 1:numel(ue(i).inFlight)
         [~, spent] = phy.rx.policy.remainingPdbSlots(ue(i).inFlight(f).pdbMs, ...
-            ue(i).inFlight(f).tGenSlot, nPhys, scen.mu);
+            ue(i).inFlight(f).tGenSlot, nPhys, scen.mu, scen.decodeMarginSlots);
         if spent
             resolved(end + 1) = sap.ctxFinish(ue(i).inFlight(f), codes.pdbExpired, nPhys); %#ok<AGROW>
             stillFlying(f) = false;
@@ -835,7 +835,7 @@ if ~any(avail > 0)
 end
 oldest  = u.lch.q(1);
 [remPhys, expired] = phy.rx.policy.remainingPdbSlots(oldest.pdbMs, oldest.tGenSlot, ...
-    scen.physOfLogical(nLog + 1), scen.mu);
+    scen.physOfLogical(nLog + 1), scen.mu, scen.decodeMarginSlots);
 if expired
     return;
 end

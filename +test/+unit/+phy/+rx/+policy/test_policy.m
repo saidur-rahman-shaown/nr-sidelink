@@ -16,21 +16,41 @@ probePdu = 350;                      % needs 2 sub-channels: 200 < 350 <= 400
 
 %% ---- remainingPdbSlots -------------------------------------------------
 % 100 ms PDB at mu=1 (0.5 ms slots) is 200 slots. Nothing elapsed yet.
-[rem, expired] = phy.rx.policy.remainingPdbSlots(100, 0, 0, 1);
+[rem, expired] = phy.rx.policy.remainingPdbSlots(100, 0, 0, 1, 0);
 assert(rem == 200 && ~expired, 'remainingPdbSlots: 100 ms at mu=1 is 200 slots, got %d', rem);
 % Numerology scaling: the same PDB is half as many slots at mu=0.
-assert(phy.rx.policy.remainingPdbSlots(100, 0, 0, 0) == 100, 'remainingPdbSlots: must scale with 2^mu');
-assert(phy.rx.policy.remainingPdbSlots(100, 0, 0, 3) == 800, 'remainingPdbSlots: must scale with 2^mu at mu=3');
+assert(phy.rx.policy.remainingPdbSlots(100, 0, 0, 0, 0) == 100, 'remainingPdbSlots: must scale with 2^mu');
+assert(phy.rx.policy.remainingPdbSlots(100, 0, 0, 3, 0) == 800, 'remainingPdbSlots: must scale with 2^mu at mu=3');
 % Elapsed time comes off the budget, one slot at a time.
-assert(phy.rx.policy.remainingPdbSlots(100, 10, 60, 1) == 150, 'remainingPdbSlots: 50 slots elapsed must leave 150');
+assert(phy.rx.policy.remainingPdbSlots(100, 10, 60, 1, 0) == 150, 'remainingPdbSlots: 50 slots elapsed must leave 150');
 % Exactly exhausted, and past exhausted, both clamp to 0 and report expired.
-[rem, expired] = phy.rx.policy.remainingPdbSlots(100, 0, 200, 1);
+[rem, expired] = phy.rx.policy.remainingPdbSlots(100, 0, 200, 1, 0);
 assert(rem == 0 && expired, 'remainingPdbSlots: budget exactly spent must report expired');
-[rem, expired] = phy.rx.policy.remainingPdbSlots(100, 0, 500, 1);
+[rem, expired] = phy.rx.policy.remainingPdbSlots(100, 0, 500, 1, 0);
 assert(rem == 0 && expired, 'remainingPdbSlots: overrun must clamp at 0, not go negative, got %d', rem);
 % A budget shorter than one slot floors to zero rather than rounding up to one.
-assert(phy.rx.policy.remainingPdbSlots(0.4, 0, 0, 1) == 0, 'remainingPdbSlots: must floor, not round -- a partial slot is not usable');
-mustError(@() phy.rx.policy.remainingPdbSlots(100, 50, 10, 1), 'policy:remainingPdbSlots:negativeAge', 'currentSlot before genSlot');
+assert(phy.rx.policy.remainingPdbSlots(0.4, 0, 0, 1, 0) == 0, 'remainingPdbSlots: must floor, not round -- a partial slot is not usable');
+mustError(@() phy.rx.policy.remainingPdbSlots(100, 50, 10, 1, 0), 'policy:remainingPdbSlots:negativeAge', 'currentSlot before genSlot');
+
+%% ---- the decoding margin comes off the BUDGET, not off T2 --------------
+% The PDB is a deadline for DELIVERY, so the transmission deadline is the PDB less the time the
+% receiver needs to decode. Subtracting it here rather than inside selectionWindow keeps
+% T2 = "the remaining PDB" legal in BOTH of clause 8.1.4's branches -- a margin applied inside
+% selectionWindow would be illegal in the branch that forces T2 to equal the remaining PDB
+% exactly, and selectionWindow would need T2min purely to know which branch it was in.
+pdbSlots = 200;                                   % 100 ms at mu=1
+for margin = [0 2 5]
+    r = phy.rx.policy.remainingPdbSlots(100, 0, 0, 1, margin);
+    assert(r == pdbSlots - margin, 'a margin of %d must leave %d slots, got %d', margin, pdbSlots - margin, r);
+    [~, T2] = phy.rx.policy.selectionWindow(1, r);
+    assert(T2 == pdbSlots - margin, 'T2 must then be PDB - %d = %d, got %d', margin, pdbSlots - margin, T2);
+end
+% The expiry point moves with the margin, so a packet that could not be DECODED in time is
+% dropped rather than transmitted into a deadline it cannot meet.
+[~, deadEarly] = phy.rx.policy.remainingPdbSlots(100, 0, pdbSlots - 2, 1, 2);
+[~, aliveJust] = phy.rx.policy.remainingPdbSlots(100, 0, pdbSlots - 3, 1, 2);
+assert(deadEarly && ~aliveJust, 'with a 2-slot margin a packet must expire 2 slots before the PDB, not at it');
+mustError(@() phy.rx.policy.remainingPdbSlots(100, 0, 0, 1, -1), 'policy:remainingPdbSlots:badMargin', 'a negative decode margin');
 
 %% ---- selectionWindow ---------------------------------------------------
 % T1 is T_proc,1 exactly, at every numerology, and is never the 2.5 ms figure written down.
@@ -207,7 +227,7 @@ assert(remEnd == 4, 'pdbLogicalSlots: the budget must clamp at the end of the DF
 % PQI 55: 100 ms PDB. mu=1 -> 200 physical slots -> 100 opportunities in the half pool.
 t   = cfg.pqiTable();
 row = t([t.PQI] == 55);
-[remPhys, expired] = phy.rx.policy.remainingPdbSlots(row.PDB_ms, 900, 1000, mu);
+[remPhys, expired] = phy.rx.policy.remainingPdbSlots(row.PDB_ms, 900, 1000, mu, 0);
 assert(remPhys == 100 && ~expired, 'chain: 200-slot budget with 100 elapsed leaves 100 physical slots, got %d', remPhys);
 [remLogical, nTrig] = phy.rx.policy.pdbLogicalSlots(loAlt, 1000, remPhys);
 assert(remLogical == 50, 'chain: 100 physical slots is 50 opportunities in a half pool, got %d', remLogical);

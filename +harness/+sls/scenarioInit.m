@@ -1,9 +1,15 @@
-function scen = scenarioInit(nUe, seed, castLabel)
+function scen = scenarioInit(nUe, seed, castLabel, ov)
 %scenarioInit Build the baseline system-level scenario.
 %Spec:   none -- scenario configuration. Every 3GPP quantity in it is resolved through the
 %        package that owns it (poolSlotMap, mcsTableSelect, tbsDetermine, policy.defaults).
 %Inputs: nUe        integer, >=2 -- number of UEs
 %        seed       integer -- RNG seed. The ONE source of randomness in a run
+%        ov         scalar struct, optional -- primitive overrides applied BEFORE the
+%                   derivations that consume them, so a caller can change the MCS or the pool
+%                   geometry and have the transport block table, L_subCH, the escalation bound
+%                   and the measurement windows all follow. simConfig via
+%                   harness.sls.scenarioFromConfig is the intended caller; every field is
+%                   optional and anything absent keeps the default below.
 %        castLabel  char, 'broadcast' (default) or 'unicast'. Unicast pairs each UE with the
 %                   next in a ring, enables HARQ feedback, and turns on PSFCH -- which changes
 %                   the transport block size, because clause 8.1.3.2 subtracts the PSFCH
@@ -22,8 +28,11 @@ function scen = scenarioInit(nUe, seed, castLabel)
 %Every UE broadcasts, so nothing here exercises PSFCH. Unicast is supported by the SAPs and the
 %slot loop; the scenario that uses it is a separate constructor.
 
-if nargin < 3
+if nargin < 3 || isempty(castLabel)
     castLabel = 'broadcast';
+end
+if nargin < 4
+    ov = struct();
 end
 if ~(nUe >= 2 && mod(nUe, 1) == 0)
     error('sls:scenarioInit:badNUe', 'scenarioInit: nUe must be an integer >= 2, got %s', num2str(nUe));
@@ -34,10 +43,10 @@ end
 scen.castLabel = castLabel;
 scen.isUnicast = strcmp(castLabel, 'unicast');
 
-scen.mu            = 1;                  % 30 kHz SCS, the FR1 V2X numerology
+scen.mu            = ovGet(ov, 'mu', 1);              % 30 kHz SCS, the FR1 V2X numerology
 scen.slotsPerMs    = 2^scen.mu;
-scen.numSubchannel = 10;
-scen.subchSizeRb   = 10;                 % sl-SubchannelSize
+scen.numSubchannel = ovGet(ov, 'numSubchannel', 10);
+scen.subchSizeRb   = ovGet(ov, 'subchSizeRb', 10);    % sl-SubchannelSize
 scen.nPrb          = scen.numSubchannel * scen.subchSizeRb;
 scen.startRb       = 0;
 
@@ -46,9 +55,9 @@ scen.startRb       = 0;
 
 % ---- radio ----------------------------------------------------------------
 scen.radio = struct( ...
-    'fcHz',          5.9e9, ...          % ITS band
+    'fcHz',          ovGet(ov, 'fcHz', 5.9e9), ...    % ITS band
     'bwHz',          scen.nPrb * 12 * 30e3, ...   % PRBs x 12 subcarriers x 30 kHz
-    'noiseFigureDb', 9, ...
+    'noiseFigureDb', ovGet(ov, 'noiseFigureDb', 9), ...
     'plModel',       []);                % filled in below, once the geometry is known
 
 % The path loss model, chosen by NAME through the one entry point. Swapping it is a one-line
@@ -66,10 +75,10 @@ scen.radio = struct( ...
 % pessimistic one, and the two bracket the real answer.
 scen.radio.plModel = harness.chanmodel.pathlossModel('rma', struct( ...
     'fcHz',    scen.radio.fcHz, ...
-    'losMode', 'los', ...
-    'hTxM',    1.5, ...                  % vehicle-mounted antenna
-    'hRxM',    1.5));
-scen.pCmaxDbm     = 23;     % P_CMAX; slPowerControl is a max-power-always policy for now
+    'losMode', ovGet(ov, 'losMode', 'los'), ...
+    'hTxM',    ovGet(ov, 'hTxM', 1.5), ...            % vehicle-mounted antenna
+    'hRxM',    ovGet(ov, 'hRxM', 1.5)));
+scen.pCmaxDbm     = ovGet(ov, 'pCmaxDbm', 23);     % P_CMAX; slPowerControl is a max-power-always policy for now
 scen.channelModel = 'awgn';
 scen.speedKmh     = 0;
 % PSCCH decodes further out than PSSCH because its code rate is far lower and does not move
@@ -80,32 +89,38 @@ scen.speedKmh     = 0;
 
 % ---- selection policy ------------------------------------------------------
 scen.policy = phy.rx.policy.defaults();
+% Policy overrides go in BEFORE the transport block table is built, so a changed MCS changes
+% the table, which changes L_subCH, which changes the TB size. Applying them afterwards would
+% leave every one of those derived from the old value.
+scen.policy.mcs       = ovGet(ov, 'mcs', scen.policy.mcs);
+scen.policy.prsvpTxMs = ovGet(ov, 'prsvpTxMs', scen.policy.prsvpTxMs);
+scen.policy.numRetx   = ovGet(ov, 'numRetx', scen.policy.numRetx);
 scen.pool = struct( ...
-    'sensingWindowMs',  100, ...
-    'thresholdListDbm', repmat(-110, 1, 64), ...   % sl-Thres-RSRP-List, pre-resolved
-    'txPercentage',     0.2, ...                   % sl-TxPercentage
+    'sensingWindowMs',  ovGet(ov, 'sensingWindowMs', 100), ...
+    'thresholdListDbm', repmat(ovGet(ov, 'thresRsrpDbm', -110), 1, 64), ...   % sl-Thres-RSRP-List, pre-resolved
+    'txPercentage',     ovGet(ov, 'txPercentage', 0.2), ...                   % sl-TxPercentage
     'allowedPeriodsMs', 100, ...                   % sl-ResourceReservePeriodList
-    'T2minRaw',         20, ...                    % sl-SelectionWindow
-    'slProbResourceKeep', 0.4, ...
+    'T2minRaw',         ovGet(ov, 'selectionWindowRaw', 20), ...                    % sl-SelectionWindow
+    'slProbResourceKeep', ovGet(ov, 'probResourceKeep', 0.4), ...
     'slReselectAfter',  Inf, ...
-    'slPreemptionEnable', 'enabled', ...
-    'threshSRssiCbrDbm', -94, ...           % sl-Thres-RSSI-CBR, pre-resolved to dBm
+    'slPreemptionEnable', ovGet(ov, 'preemptionEnable', 'enabled'), ...
+    'threshSRssiCbrDbm', ovGet(ov, 'threshSRssiCbrDbm', -94), ...           % sl-Thres-RSSI-CBR, pre-resolved to dBm
     'timeWindowSizeCBR', 'ms100', ...       % sl-TimeWindowSizeCBR-r16
     'timeWindowSizeCR',  'ms1000', ...      % sl-TimeWindowSizeCR-r16
-    'cbrRangeUpperBounds', [0.2 0.4 0.6 0.8 1.0], ...  % one SL-CBR-LevelsConfig, as ratios
-    'crLimitByLevel', [1.0 0.6 0.3 0.12 0.05]);        % sl-CR-Limit per CBR level, pre-resolved       % sl-PreemptionEnable-r16; '' disables it entirely                      % not configured: never fires on unused periods
+    'cbrRangeUpperBounds', ovGet(ov, 'cbrRangeUpperBounds', [0.2 0.4 0.6 0.8 1.0]), ...  % one SL-CBR-LevelsConfig, as ratios
+    'crLimitByLevel', ovGet(ov, 'crLimitByLevel', [1.0 0.6 0.3 0.12 0.05]));        % sl-CR-Limit per CBR level, pre-resolved       % sl-PreemptionEnable-r16; '' disables it entirely                      % not configured: never fires on unused periods
 
 % ---- traffic ---------------------------------------------------------------
-pqi = 55;                                % CAM-like periodic awareness, the pqiTable default row
+pqi = ovGet(ov, 'pqi', 55);              % CAM-like periodic awareness, the pqiTable default row
 t   = cfg.pqiTable();
 row = t([t.PQI] == pqi);
 scen.traffic = struct( ...
     'pqi',         pqi, ...
     'prio',        row.priority, ...
-    'pdbMs',       row.PDB_ms, ...
-    'periodSlots', 100 * scen.slotsPerMs, ...      % 100 ms CAM period
-    'sizeBytes',   300, ...
-    'lcid',        4, ...
+    'pdbMs',       ovGet(ov, 'pdbMsOverride', row.PDB_ms), ...
+    'periodSlots', ovGet(ov, 'periodMs', 100) * scen.slotsPerMs, ...
+    'sizeBytes',   ovGet(ov, 'sizeBytes', 300), ...
+    'lcid',        ovGet(ov, 'lcid', 4), ...
     'pbrBytesPerSec', 300 * 10, ...      % sl-PrioritisedBitRate: one 300-byte CAM per 100 ms
     'bsdSeconds',     0.1);              % sl-BucketSizeDuration, so the bucket holds one CAM
 
@@ -115,13 +130,13 @@ scen.traffic = struct( ...
 % size. The MAC PDU overhead is measured by building a PDU with muxSlSch rather than guessed --
 % the subheader widths are clause 6.2.4's and belong to that function.
 [~, Qm, R] = phy.ts38214.mcsTableSelect(scen.policy.mcs, '', 0);
-scen.slLengthSymbols = 12;
+scen.slLengthSymbols = ovGet(ov, 'slLengthSymbols', 12);
 % PSFCH costs transport-block capacity: clause 8.1.3.2 subtracts the PSFCH symbols from N_RE,
 % so enabling feedback shrinks every TB in the pool whether or not a given transmission uses
 % it. Computing the TBS table with the real period is what makes that cost visible rather than
 % free.
 if scen.isUnicast
-    scen.slPsfchPeriod = 1;              % sl-PSFCH-Period: a PSFCH occasion every pool slot
+    scen.slPsfchPeriod = ovGet(ov, 'psfchPeriodSlots', 1);   % sl-PSFCH-Period
 else
     scen.slPsfchPeriod = 0;              % disabled in the broadcast baseline
 end
@@ -129,16 +144,21 @@ end
 % LOWEST sub-channel of the PSSCH allocation (clause 8.1.2.2). These are the values the TBS
 % arithmetic below already assumes for N_RE^SCI1, so they are named once and reused rather than
 % written twice with a chance of drifting apart.
-scen.pscchPrb        = scen.subchSizeRb;
-scen.pscchSymbols    = 2;
-scen.maxNumPerReserve = 2;               % sl-MaxNumPerReserve; matches policy.numRetx = 1
-scen.reservePeriodListMs = [0 100];      % sl-ResourceReservePeriodList, pre-resolved to ms
-scen.minTimeGapPsfch = 2;                % sl-MinTimeGapPSFCH, in pool slots
+scen.pscchPrb        = ovGet(ov, 'pscchPrb', scen.subchSizeRb);
+scen.pscchSymbols    = ovGet(ov, 'pscchSymbols', 2);
+scen.maxNumPerReserve = ovGet(ov, 'maxNumPerReserve', 2);   % sl-MaxNumPerReserve
+scen.reservePeriodListMs = unique([0, 100, scen.policy.prsvpTxMs]);   % sl-ResourceReservePeriodList, ms
+scen.minTimeGapPsfch = ovGet(ov, 'minTimeGapPsfch', 2);     % sl-MinTimeGapPSFCH, pool slots
 scen.psfchRbSetSize  = scen.numSubchannel * max(1, scen.slPsfchPeriod);  % M_PRB,set^PSFCH
 scen.psfchNumMuxCsPair = 6;              % sl-NumMuxCS-Pair, N_CS^PSFCH
 scen.psfchNtype        = 1;              % sl-PSFCH-CandidateResourceType = startSubCH
 scen.slMaxTransNum             = 1 + scen.policy.numRetx + 2;
 scen.slMaxNumConsecutiveDTX    = 4;
+% Slots reserved at the end of the delay budget for the RECEIVER to decode. The PDB is a
+% deadline for delivery, so the transmission deadline is the PDB less this. Subtracted inside
+% phy.rx.policy.remainingPdbSlots, which keeps T2 = "the remaining PDB" legal in both of clause
+% 8.1.4's branches -- see that function's header.
+scen.decodeMarginSlots = ovGet(ov, 'decodeMarginSlots', 2);
 % How long a receive Sidelink process may sit idle before it is released. A policy, not a clause
 % deadline (clause 5.22.2.2.1 NOTE 1) -- see mac.harqRxAge -- and DERIVED from how long one TB's
 % transmissions can legitimately span, which differs by cast type:
@@ -205,7 +225,12 @@ if onePdu > scen.maxTbsBytes
 end
 
 scen.nUe      = nUe;
-scen.spacingM = 20;
+% Which UEs generate traffic. All of them by default; harness.sls.scenarioFromConfig narrows it
+% to model a single link. A UE outside this mask still RECEIVES and still senses -- it is a
+% silent neighbour, not an absent one, which is the distinction that makes a one-link scenario
+% inside a populated pool possible.
+scen.txUeMask = true(1, nUe);
+scen.spacingM = ovGet(ov, 'spacingM', 20);
 scen.posXY    = [(0:nUe - 1)' * scen.spacingM, zeros(nUe, 1)];
 
 % ---- congestion control windows (TS 38.215 clause 5.1.25 / 5.1.26) ---------
@@ -251,4 +276,15 @@ scen.prioByUe = repmat(scen.traffic.prio, 1, nUe);
 % stream in the simulator.
 scen.seed   = seed;
 scen.stream = RandStream('mt19937ar', 'Seed', seed);
+end
+
+% =========================================================================
+function v = ovGet(ov, name, dflt)
+%ovGet One override field, or its default. Empty counts as absent, so a config may carry a
+%placeholder [] for a value it does not wish to set (pdbMsOverride uses exactly that).
+if isfield(ov, name) && ~isempty(ov.(name))
+    v = ov.(name);
+else
+    v = dflt;
+end
 end

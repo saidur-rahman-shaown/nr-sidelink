@@ -69,19 +69,19 @@ mustError(@() sap.lchDequeue(lch, [-1 0 0]), 'sap:lchDequeue:negativeAlloc', 'a 
 %% ---- expiry: a dead packet is a LOSS, and leaves the queue ---------------
 % mu=1, so the 100 ms PDB is 200 physical slots. Packet 1 was generated at slot 10.
 mu = 1;
-[lchE, expired] = sap.lchExpire(lch, 100, mu);
+[lchE, expired] = sap.lchExpire(lch, 100, mu, 0);
 assert(isempty(expired) && numel(lchE.q) == 4, 'lchExpire: nothing may expire before its budget runs out');
 % At slot 210 the packets generated at slot 10 are exactly spent; those from slot 11 are not.
-[lchE, expired] = sap.lchExpire(lch, 210, mu);
+[lchE, expired] = sap.lchExpire(lch, 210, mu, 0);
 assert(numel(expired) == 2, 'lchExpire: the two slot-10 packets must expire at slot 210, got %d', numel(expired));
 assert(all([expired.outcome] == codes.pdbExpired), 'lchExpire: an expired packet must be resolved as a LOSS, not left in flight');
 assert(all([expired.tRxSlot] == 0), 'lchExpire: an expired packet was never received');
 assert(numel(lchE.q) == 2 && isequal(sap.lchDataAvailable(lchE), [0 500 150]), 'lchExpire: expired packets must leave the queue');
 % One slot earlier they are still alive -- the boundary is the budget's own, not one slot late.
-[~, notYet] = sap.lchExpire(lch, 209, mu);
+[~, notYet] = sap.lchExpire(lch, 209, mu, 0);
 assert(isempty(notYet), 'lchExpire: the boundary must be the budget''s own slot, not one earlier');
 % and the discard point agrees with the selection-window feasibility point, by construction.
-[~, dead] = phy.rx.policy.remainingPdbSlots(100, 10, 210, mu);
+[~, dead] = phy.rx.policy.remainingPdbSlots(100, 10, 210, mu, 0);
 assert(dead, 'the policy and the queue must agree on when a budget is spent');
 % Conservation again: expired + remaining == what went in.
 assert(numel(expired) + numel(lchE.q) == numel(lch.q), 'lchExpire: contexts must be conserved');
