@@ -187,9 +187,10 @@ survives the others as interference. That is the capture effect, and it is why a
 not automatically a double loss.
 
 ### The measured table, and how its grid was arrived at
-`harness.phyabs.blerTable` is generated output — 121 SNR points, 5 MCS values, 3 attempts —
-and it took three generations to get a grid that actually resolves what it measures. Both
-failures are worth keeping, because both produce a table that *looks* fine:
+`harness.phyabs.blerTable` is generated output — 5 MCS values, 3 attempts, and an SNR grid
+whose shape depends entirely on the channel it was measured over. It took three generations to
+get an AWGN grid that actually resolves what it measures. Both failures are worth keeping,
+because both produce a table that *looks* fine:
 
 1. **Uniform 1 dB grid.** An AWGN waterfall for a few-thousand-bit LDPC block is under 1 dB
    wide, so the transition was stored as two adjacent points, 1 and 0 — **zero interior points
@@ -199,20 +200,46 @@ failures are worth keeping, because both produce a table that *looks* fine:
    about 12 dB lower, and which every sensing decode reads — resolved only to the coarse 2 dB
    region.
 
-The final grid is 0.25 dB across −12 to +16 dB, covering both waterfalls: 2–4 interior points
-for PSSCH, 14–15 for PSCCH.
+The final AWGN grid was 0.25 dB across −12 to +16 dB (121 points), covering both waterfalls:
+2–4 interior points for PSSCH, 14–15 for PSCCH.
 
-Measured HARQ combining gain by the third attempt is 3.75 dB at MCS 4 rising to 7.75 dB at
-MCS 20 — it grows with the code rate, which is why the table has a retransmission dimension
-rather than a per-attempt dB bonus.
+**A faded grid is the opposite problem.** The table now in the tree is TDL-D at 120 km/h, and
+its grid is 0.5 dB across −5 to +24 dB with coarse wings (70 points). Fading turns the cliff
+into a slope: the same measurement that gave 2 interior points under AWGN gives **12–18** here,
+and the tail reaches 8 dB further right, so the grid must be *coarser and wider* rather than
+finer. Resolving a faded curve at AWGN's 0.25 dB would spend four times the compute measuring
+the same shape. `test_agreement`'s "at least two interior points per MCS" assertion catches the
+under-resolved case in either regime.
+
+The faded numbers are emitted **raw** — no smoothing and no monotonicity enforcement — so the
+curves are not perfectly monotone. At 60 trials per point the finest resolvable error rate is
+1/60 ≈ 1.7%, and a non-monotone step of that size is the measurement's noise floor showing
+honestly rather than a defect to be polished out. Anything below about 2% BLER in this table
+means "we did not see a failure", not "the failure rate is that number".
+
+Measured HARQ combining gain by the third attempt grows with the code rate, which is why the
+table has a retransmission dimension rather than a per-attempt dB bonus. Under AWGN it was
+3.75 dB at MCS 4 rising to 7.75 dB at MCS 20; under TDL-D at 120 km/h it is **5.0 dB at MCS 4
+rising to 7.5 dB at MCS 20** (50% points). The gain is *larger* at low MCS under fading than it
+was under AWGN, which is the time diversity a moving channel provides and a static one cannot:
+at 120 km/h the coherence time is about one slot, so a retransmission genuinely samples a new
+channel rather than repeating the same one.
 
 ### The PSCCH curve is MEASURED, and the old proxy was badly wrong at high MCS
 While the BLER curve was a placeholder, the system-level model approximated PSCCH by reading
 the PSSCH curve at a deliberately low `pscchEffectiveMcs`. The reasoning — control is a much
 lower-rate code — was right; the magnitude was guessed. Measured, control's advantage over data
-is **3.75 dB at MCS 4 rising to 16 dB at MCS 20**, because PSCCH's own code rate does not move
-with the data's — its 50% point sits at about −2 dB whatever the PSSCH is doing, which is the
-measurement confirming PSCCH is MCS-independent as clause 8.3.2 implies. No single proxy MCS can express an advantage that grows with the data rate, and
+is **4.0 dB at MCS 4 rising to 16.0 dB at MCS 20** under TDL-D (3.75 to 16 dB under AWGN),
+because PSCCH's own code rate does not move with the data's — its 50% point sits at −1.5 to
+−2.0 dB whatever the PSSCH is doing, which is the measurement confirming PSCCH is MCS-independent
+as clause 8.3.2 implies.
+
+**Fading barely touches control.** Going from AWGN to TDL-D costs PSSCH 3 to 3.5 dB but costs
+PSCCH about 0.5 dB — its 50% point moves from roughly −2.0 to −1.5 dB. A rate-1/8-ish polar
+code with its own DM-RS is already so far into the coding-gain regime that the fades which break
+a rate-1/2 LDPC block do not break it. The system-level consequence is that under fading the gap
+between "I can hear that UE's reservation" and "I can decode that UE's data" WIDENS, so sensing
+stays accurate at ranges where the data link has already failed. No single proxy MCS can express an advantage that grows with the data rate, and
 at high MCS the proxy understated control's reach badly. `harness.phyabs.pscchBler` reads the
 measured curve; `pscchEffectiveMcs` is gone.
 
@@ -468,13 +495,20 @@ here would make feedback fail at roughly the same range as data, which is exactl
 right sequence. Both are real and asymmetric — a false ACK loses a packet silently, a false
 NACK only wastes a retransmission — so a real curve must report them as a pair.
 
-**Still absent: fading, shadowing, antenna pattern**, and therefore the TDL half of B5's gate.
-The BLER table is AWGN-only and says so in its own `.meta`. The link is deterministic in
-distance, so a PRR-versus-distance curve carries none of the variance a real one would.
+**Fast fading is now in the link level**, through `harness.chanmodel.tdlChannel` and the TDL-D
+table it produced — that closes the TDL half of B5's gate. What the fading does *not* do is vary
+per link in the system level: the SLS reads a table indexed by SINR, so every UE at the same
+SINR sees the same average faded BLER rather than its own realisation. The fading is baked into
+the curve's shape, not resampled per packet.
 
-So: **link-level BLER and the abstraction that reads it are measured; the channel model is now
-a documented standards model used slightly out of geometry; fading is absent.** Policy-versus-
-policy comparisons on the same channel remain the soundest comparison this tree supports.
+**Still absent: shadowing and antenna pattern.** The path loss is deterministic in distance, so
+a PRR-versus-distance curve still carries less variance than a real one — log-normal shadowing
+is the missing term, and it is the cheapest remaining addition.
+
+So: **link-level BLER and the abstraction that reads it are measured under a real faded
+channel; the path-loss model is a documented standards model used slightly out of geometry;
+shadowing is absent.** Policy-versus-policy comparisons on the same channel remain the
+soundest comparison this tree supports.
 
 ### Every packet lands in exactly one bucket
 `kpiReport` asserts it. Delivered, PDB-expired, sl-MaxTransNum spent, dropped, or still in

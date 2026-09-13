@@ -92,5 +92,8 @@ example, or a module lacking a test file.
 ## Regenerating the BLER table
 `+harness/+phyabs/blerTable.m` is GENERATED — measured by `+harness/+lls/` over the real
 transmit chains. Do not hand-edit it; regenerate with `harness.lls.blerSweep` and re-emit.
-Takes about 45 minutes at the current grid. See `+harness/CLAUDE.md` for why the SNR grid is
-non-uniform and what two earlier grids got wrong.
+About 25 minutes at the current grid (TDL-D, 70 SNR points). The channel model and speed are
+**table keys**, not runtime knobs: `blerLookup` raises rather than reading off-key, so changing
+`c.radio.channelModel` means re-measuring. See `+harness/CLAUDE.md` for why the SNR grid is
+non-uniform, why a faded grid must be coarser and wider than an AWGN one, and what two earlier
+grids got wrong.

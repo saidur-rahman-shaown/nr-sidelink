@@ -1,8 +1,13 @@
-function r = linkSlot(lc, snrDb, stream, rv, tbBits)
+function r = linkSlot(lc, snrDb, stream, rv, tbBits, ch)
 %linkSlot One link-level slot: build, modulate, impair, demodulate, estimate, equalise, decode.
 %Spec:   none itself -- it sequences the normative chains and the non-normative receiver.
 %Inputs: lc      from harness.lls.linkConfig
 %        snrDb   real, dB -- Es/N0 per resource element
+%        ch      optional -- a fading channel from harness.chanmodel.tdlChannel, or [] / omitted
+%                for AWGN. Passed IN rather than built here so a sweep reuses one object across
+%                slots and the fading stays correlated between them the way a real channel is;
+%                rebuilding per slot would silently make every slot independent, which flatters
+%                nothing but destroys the correlation a Doppler figure is supposed to produce
 %        stream  RandStream -- the one source of randomness, so a sweep is reproducible
 %        rv      integer, 0..3 -- redundancy version for this transmission
 %        tbBits  trblklen-by-1, or [] -- the transport block. Passed in so a retransmission
@@ -45,6 +50,22 @@ txp = struct('Gsci2', lc.Gsci2, 'R', lc.R, 'rv', rv, 'Qm', lc.Qm, ...
 
 % ---- OFDM, then the channel ---------------------------------------------
 [waveform, ~] = phy.lib.ofdmMod(grid, lc.mu, lc.nsf);
+
+% ---- fading, if a channel was supplied -----------------------------------
+% The channel is applied BEFORE the noise, which is the physical order: the receiver's noise is
+% added at its own front end, not at the transmitter. Adding noise first and fading it
+% afterwards would scale the noise with the channel gain and make the effective SNR track the
+% fading, hiding exactly the deep fades the model exists to produce.
+if nargin >= 6 && ~isempty(ch)
+    chInfo  = ch.info;
+    % The channel filter delays the signal, so the waveform is padded and the delay removed
+    % afterwards -- otherwise the OFDM demodulator is handed a signal whose symbols straddle
+    % its window boundaries and every subcarrier picks up inter-symbol leakage that looks like
+    % a bad channel estimate.
+    padded  = [waveform; zeros(chInfo.ChannelFilterDelay, 1)];
+    faded   = ch(padded);
+    waveform = faded(chInfo.ChannelFilterDelay + 1:end);
+end
 
 % Es/N0 per RE. The noise is added in the TIME domain, at the amplitude
 % harness.lls.noiseScale measured as giving unit per-RE variance, then scaled to the target.

@@ -42,7 +42,7 @@ groups every knob by what it belongs to:
 | `c.pool` | the TX/RX resource pool: sub-channels, sensing and selection windows, RSRP thresholds, PSFCH |
 | `c.app` | traffic: PQI, period, payload size, logical channel |
 | `c.policy` | MCS, reservation period, blind retransmissions, **decode margin** |
-| `c.radio` | carrier, noise figure, transmit power, LOS/NLOS, antenna heights |
+| `c.radio` | carrier, noise figure, transmit power, LOS/NLOS, antenna heights, **small-scale channel** |
 | `c.sim` | slots, seed, whether and where to plot |
 
 Override inline instead of editing, if you prefer:
@@ -247,15 +247,35 @@ spec leaves open.
 - `congestionDrop.m` — what to do when the CR limit would be exceeded.
 
 ### Change the channel
-**`+harness/+chanmodel/`** — two functions are the whole interface:
+The channel has two halves, and they are changed in completely different ways.
+
+**Path loss — a runtime knob.** `+harness/+chanmodel/` exposes two functions, and nothing else
+in the tree calls a path loss implementation:
 
 ```matlab
 model = harness.chanmodel.pathlossModel('rma', struct('fcHz',5.9e9,'losMode','los', ...));
 pl    = harness.chanmodel.pathloss(model, dMetres);
 ```
 
-Nothing else in the tree calls a path loss implementation. **Adding TR 37.885's V2V models is
-one implementation file and one `case`** in those two functions — no caller changes.
+**Adding TR 37.885's V2V models is one implementation file and one `case`** in those two
+functions — no caller changes.
+
+**Fast fading — a re-measurement, not a knob.** `c.radio.channelModel` and `c.radio.speedKmh`
+are *keys into the measured BLER table*, not settings that change the propagation. The table was
+measured over exactly one channel (currently TDL-D at 120 km/h), and `blerLookup` **raises**
+rather than answering if you ask for another one. To actually change it:
+
+```matlab
+s  = harness.sls.scenarioInit(4, 1);
+[~, fs] = phy.lib.ofdmMod(complex(zeros(s.nPrb*12, 14)), s.mu, 0);
+ch = harness.chanmodel.tdlChannel('TDL-C', 300, 60, s.radio.fcHz, fs, 1234);
+tbl = harness.lls.blerSweep([4 7 11 16 20], snrGrid, 3, 60, 3, s, 1234, ch);
+```
+
+then emit `tbl` into `+harness/+phyabs/blerTable.m` and set `c.radio.channelModel`/`speedKmh` to
+match its new `.meta`. Budget about 25 minutes. Pick the SNR grid to suit the channel: a faded
+waterfall is 6 to 9 dB wide and wants 0.5 dB steps over a wide span, where AWGN's is 1 dB wide
+and wants 0.25 dB steps over a narrow one — see `+harness/CLAUDE.md`.
 
 ### Add a normative module
 Follow `.claude/rules/normative-packages.md`, and the session pattern in `CLAUDE.md`:
@@ -369,10 +389,14 @@ Four levels, per `+test/CLAUDE.md`:
 **no RLC segmentation**: `sap.lchDequeue` serves whole SDUs, so throughput is *under*-reported
 whenever an allocation ends with partial room.
 
-**Fading.** `+chanmodel/` is path-loss only, so the BLER table is **AWGN-only** and B5's TDL gate
-is unmet. `blerLookup` *errors* rather than substituting if asked off-key.
+**Shadowing.** `+chanmodel/` gives deterministic RMa path loss plus TDL-D fast fading, so the
+BLER table is measured under fading — but there is no log-normal shadowing term, and the fading
+is averaged into the curve rather than resampled per link. `blerLookup` *errors* rather than
+substituting if asked for a channel or speed the table was not measured under.
 
-**Mobility.** Every UE is stationary — no Doppler, no topology change.
+**Mobility.** Every UE holds a fixed position — no topology change. Doppler is present, but
+only inside the link-level measurement: the BLER table was measured at 120 km/h, so the curves
+carry the Doppler of a moving UE while the geometry does not move.
 
 **Mode 1.** gNB-scheduled operation (DCI 3_0, configured grants) is not modelled; this is a
 Mode-2 simulator.
@@ -391,8 +415,11 @@ synchronisation, per `BUILD.md`'s explicit deferral.
   exists for them.
 - **`psfchDetect` is still a placeholder curve**, and it does not model false alarm or ACK/NACK
   confusion.
-- Link-level BLER is **measured**; the map from geometry to SINR is a standards model used
-  slightly out of geometry; fading is absent. **Policy-versus-policy comparisons on the same
+- Link-level BLER is **measured under TDL-D fading at 120 km/h**; the map from geometry to SINR
+  is a standards model used slightly out of geometry; shadowing is absent, and the fading is
+  averaged into the BLER curve rather than resampled per link. Note also that TDL-D is the
+  *line-of-sight* profile — its 3 to 3.5 dB penalty over AWGN is the mildest of the TDL family,
+  so it is not "the fading penalty" in general. **Policy-versus-policy comparisons on the same
   channel are the soundest comparison this tree supports.**
 
 ---

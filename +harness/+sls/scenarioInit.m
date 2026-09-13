@@ -83,8 +83,8 @@ scen.pCmaxDbm     = ovGet(ov, 'pCmaxDbm', 23);     % P_CMAX; slPowerControl is a
 % raises rather than interpolating across models -- so these two are a KEY into that table,
 % not a knob that changes the propagation. Changing them without measuring a matching table
 % is an error by construction, which is the point.
-scen.channelModel = ovGet(ov, 'channelModel', 'awgn');
-scen.speedKmh     = ovGet(ov, 'speedKmh', 0);
+scen.channelModel = ovGet(ov, 'channelModel', 'tdld');
+scen.speedKmh     = ovGet(ov, 'speedKmh', 120);
 % PSCCH decodes further out than PSSCH because its code rate is far lower and does not move
 % with the data's -- NOT because it is narrower: +harness/+chanmodel/slotSinr shows signal and
 % noise scale together with the band, leaving the SNR identical. There is no

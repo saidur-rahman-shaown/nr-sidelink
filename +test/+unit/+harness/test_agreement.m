@@ -50,17 +50,20 @@ end
 assert(all(diff(mid) > 0), 'the waterfall must move right with MCS, got midpoints %s', mat2str(mid));
 
 %% ---- interpolation and out-of-range behave as documented ---------------
-lowest = harness.phyabs.blerLookup(tbl.mcs(1), tbl.snrDb(1) - 50, 1, 'awgn', 0);
+% The table's OWN key, read from its meta: this test must not have to be edited every time the
+% table is re-measured under a different channel. The off-key cases below are derived from it.
+key = {tbl.meta.channelModel, tbl.meta.speedKmh};
+lowest = harness.phyabs.blerLookup(tbl.mcs(1), tbl.snrDb(1) - 50, 1, key{:});
 assert(abs(lowest - tbl.pssch(1, 1, 1)) < 1e-12, 'below the grid the answer must CLAMP, not extrapolate');
-highest = harness.phyabs.blerLookup(tbl.mcs(1), tbl.snrDb(end) + 50, 1, 'awgn', 0);
+highest = harness.phyabs.blerLookup(tbl.mcs(1), tbl.snrDb(end) + 50, 1, key{:});
 assert(abs(highest - tbl.pssch(1, end, 1)) < 1e-12, 'above the grid the answer must clamp');
-assert(harness.phyabs.blerLookup(tbl.mcs(1), NaN, 1, 'awgn', 0) == 1, 'an unheard link never decodes');
+assert(harness.phyabs.blerLookup(tbl.mcs(1), NaN, 1, key{:}) == 1, 'an unheard link never decodes');
 % An off-key lookup is an error, never a substitution.
-mustError(@() harness.phyabs.blerLookup(tbl.mcs(1), 0, 1, 'tdl-c', 0), 'phyabs:blerLookup:unknownModel', 'a channel model the table was not measured under');
-mustError(@() harness.phyabs.blerLookup(tbl.mcs(1), 0, 1, 'awgn', 60), 'phyabs:blerLookup:unknownSpeed', 'a speed the table was not measured at');
+mustError(@() harness.phyabs.blerLookup(tbl.mcs(1), 0, 1, [key{1} '-not'], key{2}), 'phyabs:blerLookup:unknownModel', 'a channel model the table was not measured under');
+mustError(@() harness.phyabs.blerLookup(tbl.mcs(1), 0, 1, key{1}, key{2} + 37), 'phyabs:blerLookup:unknownSpeed', 'a speed the table was not measured at');
 % Retransmissions may only help.
 for m = tbl.mcs
-    b = arrayfun(@(a) harness.phyabs.blerLookup(m, 2, a, 'awgn', 0), 1:numel(tbl.attempt));
+    b = arrayfun(@(a) harness.phyabs.blerLookup(m, 2, a, key{:}), 1:numel(tbl.attempt));
     assert(all(diff(b) <= 1e-12), 'MCS %d: BLER must not rise with attempts, got %s', m, mat2str(b, 3));
 end
 
@@ -101,13 +104,18 @@ assert(numel(band) >= minInterior, 'the probe MCS must have a resolved transitio
 % Midpoints of the first and last resolved intervals, so both land strictly between grid points.
 probes = [mean(tbl.snrDb(band(1) - 1:band(1))), mean(tbl.snrDb(band(end):band(end) + 1))];
 
+% The re-measurement must impair the waveform the same way the table's measurement did, or this
+% gate compares a faded abstraction against an unfaded link and fails for the one reason that
+% says nothing about either. The channel is rebuilt from the table's own meta.
+ch = chanFromMeta(tbl.meta, scen);
+
 nTrials = 60;
 for j = 1:numel(probes)
     snr = probes(j);
-    predicted = harness.phyabs.blerLookup(mcs, snr, 1, 'awgn', 0);
+    predicted = harness.phyabs.blerLookup(mcs, snr, 1, key{:});
     fails = 0;
     for t = 1:nTrials
-        r = harness.lls.linkSlot(lc, snr, st, 0, []);
+        r = harness.lls.linkSlot(lc, snr, st, 0, [], ch);
         fails = fails + ~r.psschOk;
     end
     measured = fails / nTrials;
@@ -141,4 +149,20 @@ catch e
     return;
 end
 error('test_agreement:noError', 'expected an error for %s, none raised', what);
+end
+
+function ch = chanFromMeta(meta, scen)
+%chanFromMeta Rebuild the channel the table was measured over, from the table's own metadata.
+%'awgn' is the absence of a small-scale channel, so it is [] rather than a System object --
+%harness.lls.linkSlot treats an empty channel as "noise only".
+if strcmpi(meta.channelModel, 'awgn')
+    ch = [];
+    return;
+end
+assert(strncmpi(meta.channelModel, 'tdl', 3) && numel(meta.channelModel) == 4, ...
+    'test_agreement: cannot rebuild channel ''%s'' -- extend chanFromMeta', meta.channelModel);
+profile = sprintf('TDL-%s', upper(meta.channelModel(4)));
+[~, fs]  = phy.lib.ofdmMod(complex(zeros(scen.nPrb * 12, 14)), meta.mu, 0);
+ch = harness.chanmodel.tdlChannel(profile, meta.delaySpreadNs, meta.speedKmh, ...
+    scen.radio.fcHz, fs, meta.seed);
 end

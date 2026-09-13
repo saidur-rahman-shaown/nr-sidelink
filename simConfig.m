@@ -87,8 +87,8 @@ c.radio.hRxM          = 1.5;
 % +harness/+phyabs/blerTable was measured under exactly one model and speed, and blerLookup
 % raises rather than reading it off-key. To change these, measure a new table first --
 % +harness/CLAUDE.md has the procedure.
-c.radio.channelModel  = 'awgn';   % must equal blerTable's .meta.channelModel
-c.radio.speedKmh      = 0;        % must equal blerTable's .meta.speedKmh
+c.radio.channelModel  = 'tdld';   % must equal blerTable's .meta.channelModel
+c.radio.speedKmh      = 120;      % must equal blerTable's .meta.speedKmh
 
 % =====================================================================================
 % RUN

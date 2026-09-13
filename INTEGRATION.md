@@ -173,17 +173,20 @@ B4 and B5: `+phy/+chan/` transmit chains and `+phy/+rx/` sync, CE, EQ and detect
 what `+harness/CLAUDE.md`'s LLS/SLS agreement test needs in order to exist.
 
 *Done when:* loopback with no channel is bit-exact, and PSCCH/PSSCH BLER over AWGN and TDL has
-the expected shape. **Met for AWGN**: both chains round-trip bit-exact, PSCCH falls 0.99 → 0.00
-between −10 and −2 dB and PSSCH between 0 and +4 dB at MCS 7, and the RE accounting test shows
-no element claimed twice or written unclaimed. **Not met for TDL** — `+harness/+chanmodel/`
-has no fading model, so only the AWGN half of that gate is closed. `psbchTx`/`psfchTx` are also
-not built: nothing consumes them (sync is idealised, PSFCH is modelled at sequence-detection
-level), so they are additions rather than gaps in the loop.
+the expected shape. **Met, both halves.** AWGN: both chains round-trip bit-exact, PSCCH falls
+0.99 → 0.00 between −10 and −2 dB and PSSCH between 0 and +4 dB at MCS 7, and the RE accounting
+test shows no element claimed twice or written unclaimed. TDL: `harness.chanmodel.tdlChannel`
+supplies TR 38.901 TDL-A..E, and the measured TDL-D waterfall has the shape fading predicts —
+6 to 9 dB wide against AWGN's 1, with the 10% point 3 to 3.5 dB further right at every MCS.
+`psbchTx`/`psfchTx` are now built as well.
 
-### Phase 3 — generate the real BLER tables  — **DONE** (AWGN)
-Measured: 121 SNR points x 5 MCS x 3 attempts, 0.25 dB across both waterfalls. PSCCH decodes
-3.75 dB (MCS 4) to 16 dB (MCS 20) earlier than PSSCH; HARQ combining is worth 3.75 to 7.75 dB
-by the third attempt. Both replaced guesses.
+### Phase 3 — generate the real BLER tables  — **DONE** (TDL-D; AWGN measured first)
+The table in the tree is **TDL-D at 120 km/h**: 70 SNR points x 5 MCS x 3 attempts, 0.5 dB
+across both waterfalls with coarse wings. PSCCH decodes 4.0 dB (MCS 4) to 16.0 dB (MCS 20)
+earlier than PSSCH; HARQ combining is worth 5.0 to 7.5 dB by the third attempt. `blerLookup`
+takes the channel and speed as table KEYS and raises rather than reading off-key, so switching
+back to the AWGN table (121 points, 0.25 dB, in the history) means re-measuring, not
+reinterpreting. Both replaced guesses.
 Run Phase 2 across the key structure fixed in Phase 0; replace Phase 1's placeholder curve.
 State the interpolation rule and the out-of-range behaviour explicitly — silent extrapolation
 off the end of a BLER table is how an SLS produces confident nonsense.

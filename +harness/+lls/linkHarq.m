@@ -1,4 +1,4 @@
-function okByAttempt = linkHarq(lc, snrDb, nAttempts, stream)
+function okByAttempt = linkHarq(lc, snrDb, nAttempts, stream, ch)
 %linkHarq One transport block over up to nAttempts transmissions, with soft combining.
 %Spec:   none. The redundancy version sequence is TS 38.321 clause 5.22.1.3.1's; the SOFT
 %        BUFFER is a receiver structure the spec does not describe.
@@ -6,6 +6,12 @@ function okByAttempt = linkHarq(lc, snrDb, nAttempts, stream)
 %        snrDb      real, dB -- Es/N0 per RE, the same on every attempt
 %        nAttempts  integer, >=1 -- transmissions to run
 %        stream     RandStream
+%        ch         optional -- a fading channel from harness.chanmodel.tdlChannel, or [] for
+%                   AWGN. Shared across the attempts on purpose: under fading a retransmission
+%                   must see a channel CORRELATED with the first attempt's, not an independent
+%                   draw. Making them independent would hand HARQ a diversity gain the Doppler
+%                   does not actually provide at this speed, which is the whole quantity the
+%                   retransmission dimension of the table exists to measure
 %Outputs: okByAttempt  1 x nAttempts logical -- whether the block had decoded by attempt n.
 %                      Cumulative: once true it stays true, because a receiver that has already
 %                      decoded does not un-decode
@@ -28,6 +34,11 @@ decoder.TransportBlockLength  = lc.trblklen;
 decoder.LDPCDecodingAlgorithm = 'Normalized min-sum';
 decoder.MaximumLDPCIterationCount = 12;
 
+if nargin < 5
+    ch = [];
+end
+chArg = ch;
+
 rvSequence = [0 2 3 1];                       % clause 5.22.1.3.1's order
 okByAttempt = false(1, nAttempts);
 tbBits = [];
@@ -35,7 +46,7 @@ decoded = false;
 
 for a = 1:nAttempts
     rv = rvSequence(mod(a - 1, numel(rvSequence)) + 1);
-    r  = harness.lls.linkSlot(lc, snrDb, stream, rv, tbBits);
+    r  = harness.lls.linkSlot(lc, snrDb, stream, rv, tbBits, chArg);
     tbBits = r.tbBits;
     if ~decoded
         % The decoder accumulates into its own soft buffer across calls, so each attempt is
