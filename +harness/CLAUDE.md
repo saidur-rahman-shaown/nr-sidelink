@@ -551,3 +551,48 @@ correct-looking output — until a real TDD pattern or S-SSB arrives. Convert th
 anyway. `+test/+unit/+harness/test_poolAllSlots.m` carries a deliberately non-identity
 configuration alongside the baseline for this reason, and a case showing that excluding one
 slot removes ten (see `+phy/+ts38214/CLAUDE.md`).
+
+### Several flows on one UE, and the two bugs that only appear once there are
+`scen.flows` is an array: one application generator per sidelink logical channel, every
+transmitting UE running all of them. The MAC SAP (`+sap/lchInit`) and LCP (`+mac/slLcp`) have
+been multi-channel since they were written — it was this harness that collapsed everything onto
+one channel, and two of its shortcuts were indistinguishable from correct while it did.
+
+**1. LCP returns BYTE BUDGETS, and turning them into whole SDUs is the caller's job.**
+`slLcp`'s own header says so. This harness skipped it, handing the raw budgets to
+`sap.lchDequeue`, which serves whole SDUs and silently discards the remainder of any budget too
+small for the next one. With one flow the budget was always either enough or zero, so nothing
+was lost. With three, measured: budgets of `[229 190 405]` against SDUs of `[300 190 450]`
+served **one** SDU and wasted **634 of 824 usable bytes, every period**. The fix
+(`wholeSduAlloc` in `slotStep`) is two sweeps — spend each channel's own budget in priority
+order first, because that is the prioritised-bit-rate guarantee, then re-offer everything
+unspent in priority order again. Its `takeWhole` mirrors `lchDequeue`'s rule exactly, including
+the part that is *not* strict FIFO: neither stops at an SDU too large for the budget, because a
+later smaller one on the same channel may still fit. Computing a budget under a different rule
+than the one that spends it is how a grant ends up sized for SDUs that are never the ones served.
+
+**2. A persistent grant must be sized for the ARRIVING load, not the instantaneous queue.**
+A selected grant is reused for C_resel periods, so sizing it from whatever happened to be queued
+at the instant of selection freezes that snapshot into the width the UE then lives with. With
+one flow whose period equalled P_rsvp_TX the two numbers were the same. With three: a UE sized
+its grant at 576 bytes against a 940-byte-per-period load and starved, delivering 49/100, 60/100
+and 77/100 where each flow **alone** delivered 100/100. `slotStep` now takes the larger of the
+instantaneous queue and `ceil(P_rsvp_TX / period_f)` SDUs per flow. `ceil`, not the mean: a flow
+slower than the reservation period contributes a whole SDU in the periods it does arrive in, and
+a grant sized for its average is too small in exactly those periods.
+
+Two clause-5.22.1.2 conditions were also hardcoded `false` and are now wired, because with one
+flow at P_rsvp_TX they could never fire: `cannotAccommodateSdu` and `pdbNotMet`. The second
+needs a gate that is easy to miss — trigger only when the remaining PDB still exceeds
+`T_proc,1`. Without it the UE thrashes: the grant is cleared, a new one is selected that also
+cannot meet the deadline, and it is cleared again next slot. Measured, that cost **69% of the
+UE's transmission opportunities** (137 transmissions where 220 periods were available). NOTE 2
+makes the condition an implementation choice, and the choice has to be whether reselecting would
+actually help.
+
+**The reservation period, not the radio, decides whether a tight flow survives.** One grant is
+one transport block per period, so worst-case queueing delay is one period. Three flows
+(PDB 100/20/200 ms) at P_rsvp_TX of 50, 20 and 10 ms: the 20 ms flow delivers 71%, 87%, 99%
+while the other two stay at 100% throughout. Nothing about the channel changes across those
+three runs. `runSim` prints offered load against grant capacity every run so an overloaded
+reservation is not mistaken for a bad link — they produce identical PDB expiries in the KPI table.

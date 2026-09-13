@@ -6,12 +6,14 @@ function u = ueInit(ueId, scen)
 %        scen  from +harness/+sls/scenarioInit
 %Outputs: u  scalar struct:
 %   .ueId .posXY .srcL2Id .dstL2Id  identity and geometry
-%   .lch     the MAC SAP, +sap/lchInit
+%   .lch     the MAC SAP, +sap/lchInit -- ONE logical channel per flow in scen.flows
 %   .grant   the selected-grant lifecycle, +mac/grantInit
 %   .harq    the HARQ entity, +mac/harqInit
 %   .db      the sensing database, +phy/+ts38214/sensingDbInit
 %   .nextPktId       integer -- monotonic packet counter
-%   .trafficOffset   integer -- this UE's CAM phase within the generation period
+%   .flowOffset      1 x nFlow integer -- each flow's generation phase within its own period
+%   .flowCount       1 x nFlow integer -- packets this UE has generated on each flow, so a flow
+%                    with a finite .nPackets stops when its quota is met
 %   .periodIdx       integer -- which reservation period of the current grant we are in, so
 %                    grantOnPeriodEnd fires exactly once per period
 %   .periodRefSlot   integer -- the logical slot the period count is measured from, fixed at
@@ -29,7 +31,9 @@ function u = ueInit(ueId, scen)
 %   .inFlight        struct array of contexts transmitted and not yet resolved
 %   .inFlightProc    1 x n integer -- the HARQ process each in-flight context is riding
 %   .peerUeId        integer -- the unicast peer, or 0 for broadcast
-%   .prio            integer, 1..8 -- this UE's sl-Priority, from scen.prioByUe. 1 is HIGHEST
+%   .prio            integer, 1..8 -- the priority of this UE's TRANSMISSIONS, from
+%                    scen.prioByUe: with several flows multiplexed that is the highest of them.
+%                    NOT the same as .lch.prio, which is per logical channel and drives LCP
 %   .psfchTx         struct array of PSFCH this UE owes, one per PSSCH it decoded and must
 %                    acknowledge, scheduled at the slot psfchTiming picked
 %   .psfchWait       struct array of PSFCH this UE is expecting back for its own transmissions
@@ -63,12 +67,13 @@ u = struct( ...
     'dstL2Id',       peerDst(ueId, scen), ...
     'peerUeId',      peerUe(ueId, scen), ...
     'prio',          scen.prioByUe(ueId), ...
-    'lch',           sap.lchInit(scen.traffic.lcid, scen.prioByUe(ueId), peerDst(ueId, scen), scen.traffic.pbrBytesPerSec, scen.traffic.bsdSeconds, scen.isUnicast), ...
+    'lch',           lchFromFlows(ueId, scen), ...
     'grant',         mac.grantInit(), ...
     'harq',          mac.harqInit(4, isPeriodicMode2), ...
     'db',            phy.ts38214.sensingDbInit(), ...
     'nextPktId',     1, ...
-    'trafficOffset', mod(ueId - 1, scen.traffic.periodSlots), ...
+    'flowOffset',    flowOffsets(ueId, scen), ...
+    'flowCount',     zeros(1, scen.nFlow), ...
     'periodIdx',     0, ...
     'periodRefSlot', 0, ...
     'nextProc',      0, ...
@@ -131,4 +136,30 @@ end
 function t = psfchWaitTemplate()
 %psfchWaitTemplate One PSFCH this UE expects back for a PSSCH it sent.
 t = struct('slot', 0, 'fromUeId', 0, 'procIdx', 0);
+end
+
+function lch = lchFromFlows(ueId, scen)
+%lchFromFlows The MAC SAP for this UE: one sidelink logical channel per flow.
+%Every flow's parameters are already resolved in scen.flows; this only turns the struct array
+%into the parallel row vectors +sap/lchInit takes, and gives every channel the same
+%Destination Layer-2 ID because every flow on a UE goes to the same peer. Flows to DIFFERENT
+%destinations would be several Destinations in clause 5.22.1.4.1.2's sense and a separate
+%change: LCP selects one Destination per PDU, so they cannot share a transport block.
+dst = peerDst(ueId, scen);
+n   = scen.nFlow;
+lch = sap.lchInit([scen.flows.lcid], [scen.flows.prio], repmat(dst, 1, n), ...
+    [scen.flows.pbrBytesPerSec], [scen.flows.bsdSeconds], repmat(scen.isUnicast, 1, n));
+end
+
+function off = flowOffsets(ueId, scen)
+%flowOffsets Each flow's generation phase, staggered across BOTH the UEs and the flows.
+%+app/trafficPeriodic's header says why the UE stagger matters: a common offset synchronises
+%the scenario's traffic and manufactures a collision pattern unrelated to the resource
+%selection being measured. The same argument applies between flows on one UE -- generating
+%every flow in the same slot turns N flows into one N-times-larger arrival, which is the one
+%case that never exercises LCP's ordering across separate arrivals.
+off = zeros(1, scen.nFlow);
+for f = 1:scen.nFlow
+    off(f) = mod((ueId - 1) * scen.nFlow + (f - 1), scen.flows(f).periodSlots);
+end
 end

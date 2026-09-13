@@ -40,7 +40,7 @@ groups every knob by what it belongs to:
 |---|---|
 | `c.link` | how many UEs, how far apart, **which of them transmit**, unicast or broadcast |
 | `c.pool` | the TX/RX resource pool: sub-channels, sensing and selection windows, RSRP thresholds, PSFCH |
-| `c.app` | traffic: PQI, period, payload size, logical channel |
+| `c.app` | **`c.app.flows`** — one entry per generator, each on its own STCH: PQI, period, payload size, LCID, packet count |
 | `c.policy` | MCS, reservation period, blind retransmissions, **decode margin** |
 | `c.radio` | carrier, noise figure, transmit power, LOS/NLOS, antenna heights, **small-scale channel** |
 | `c.sim` | slots, seed, whether and where to plot |
@@ -50,9 +50,46 @@ Override inline instead of editing, if you prefer:
 ```matlab
 c = simConfig();
 c.link.spacingM = 400;
-c.app.sizeBytes = 190;
+c.app.flows(1).sizeBytes = 190;
 k = runSim(c);
 ```
+
+### Several traffic generators
+`c.app.flows` is an array. Each entry is one application generator mapped to **its own sidelink
+logical channel (STCH)**, and every transmitting UE runs all of them — which is the case
+TS 38.321 clause 5.22.1.4.1's logical channel prioritisation exists for. One transport block
+carries SDUs from several flows, so a multiplexed run spends *fewer transmissions than it
+delivers packets*.
+
+```matlab
+c = simConfig();
+c.app.flows = struct( ...
+    'pqi',       {55,  70,  89}, ...    % 100 ms PDB, 20 ms, 200 ms
+    'periodMs',  {100, 100, 100}, ...
+    'sizeBytes', {300, 190, 450}, ...
+    'lcid',      {4,   5,   6}, ...     % Table 6.2.4-1: STCH is 4..19, distinct per flow
+    'nPackets',  {600, 600, 600}, ...   % each generator stops after this many
+    'pdbMsOverride', {[], [], []});
+c.sim.nSlots = [];                      % AUTO: generate every quota, then drain
+k = runSim(c);
+```
+
+`nPackets` plus `c.sim.nSlots = []` is what makes a *count-based* experiment work: the run
+lengthens itself to generate every packet and then drains for one full PDB, so nothing is left
+in flight. Packets still in flight are excluded from every ratio, so a run cut short reports a
+reliability figure that looks fine and is simply incomplete.
+
+`kpi.byFlow` carries a row per flow — counts, percentiles, goodput, and `withinPdb` scored
+against **that flow's own PDB**. The latency figure draws one CDF per flow with its own dashed
+deadline, because pooling a 20 ms safety flow with a 500 ms status flow describes neither.
+
+> **The reservation period is the knob that decides whether tight flows survive.** One selected
+> grant offers one transport block per `c.policy.prsvpTxMs`, so a UE's capacity is
+> `maxTBS / prsvpTxMs` bytes per second and its worst-case queueing delay is one period. Set it
+> longer than a flow's PDB and that flow expires waiting, however good the radio is. Measured on
+> the three flows above, the 20 ms-PDB flow delivers 71%, 87% and 99% at `prsvpTxMs` of 50, 20
+> and 10 ms while the other two stay at 100%. `runSim` prints offered load against grant
+> capacity every run so the overloaded case is visible rather than inferred.
 
 `c.link.txUeIds` is what makes a single link possible inside a populated pool: UEs not in that
 list still **receive and still sense**, they just do not generate traffic. They are silent

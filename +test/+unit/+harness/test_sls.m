@@ -27,13 +27,13 @@ assert(~isequaln(a, c), 'run: a different seed must produce a different run, or 
 %% ---- latency is measured from generation, and honestly ------------------
 [~, ue, scen] = harness.sls.run(6, 800, 11);
 assert(all(k.latencyMs >= 0), 'latency cannot be negative');
-assert(all(k.latencyMs <= scen.traffic.pdbMs), 'no DELIVERED packet may exceed its PDB -- lchExpire should have dropped it first');
+assert(k.withinPdb == 1, 'no DELIVERED packet may exceed ITS OWN PDB -- lchExpire should have dropped it first');
 assert(abs(k.latencyMeanMs - mean(k.latencyMs)) < 1e-9, 'the reported mean must be the mean of the reported samples');
 assert(k.latencyP50Ms <= k.latencyP90Ms && k.latencyP90Ms <= k.latencyP99Ms && k.latencyP99Ms <= k.latencyMaxMs, ...
     'the latency percentiles must be ordered');
 % Goodput is payload only. Recompute it independently from the delivered count.
 runMs = 800 / 2^scen.mu;
-assert(abs(k.goodputKbps - k.nDelivered * scen.traffic.sizeBytes * 8 / runMs) < 1e-6, ...
+assert(abs(k.goodputKbps - k.nDelivered * scen.flows(1).sizeBytes * 8 / runMs) < 1e-6, ...
     'goodput must be delivered payload over wall-clock time, with no MAC overhead counted');
 
 %% ---- the two reliability figures are different, and both are reported ---
@@ -380,16 +380,87 @@ end
 assert(harness.sls.slotToLogical(scW, nDfn) > harness.sls.slotToLogical(scW, nDfn - 1), ...
     'the logical index must be monotone ACROSS the wrap, not reset to zero');
 
-% And a run that actually crosses it must complete and conserve packets.
+% And a run that actually crosses it must complete and conserve packets. Pinned to ONE flow:
+% this section is about the wrap arithmetic, and a multi-flow config's delivery ratio moves
+% with the reservation period, which would make this assertion fail for an unrelated reason.
 cW = simConfig();
 cW.sim.plot   = false;
 cW.sim.nSlots = round(2.5 * nDfn);          % 2.5 DFN periods, about 25 s
+cW.app.flows  = cW.app.flows(1);
 kW = runSim(cW);
 assert(kW.nGenerated > 0, 'a 25 s run must generate traffic');
 assert(kW.nDelivered + kW.nExpired + kW.nInFlight == kW.nGenerated, ...
     'conservation must hold across DFN wraps');
 assert(kW.nDelivered / kW.nGenerated > 0.9, ...
     'delivery must not collapse at a wrap boundary, got %d of %d', kW.nDelivered, kW.nGenerated);
+
+%% ---- several flows, each on its own STCH, are multiplexed and scored apart
+% The MAC SAP and clause 5.22.1.4.1's LCP have been multi-channel from the start; this asserts
+% the harness now uses that rather than collapsing every generator onto one logical channel.
+cF = simConfig();
+cF.sim.plot  = false;
+cF.sim.nSlots = [];                          % auto: long enough to finish the quota and drain
+cF.policy.prsvpTxMs = 20;
+cF.app.flows = struct( ...
+    'pqi',       {55,  70,  89}, ...         % 100 ms PDB / prio 6, 20 ms / prio 3, 200 ms / prio 3
+    'periodMs',  {100, 100, 100}, ...
+    'sizeBytes', {300, 190, 450}, ...
+    'lcid',      {4,   5,   6}, ...
+    'nPackets',  {40,  40,  40}, ...
+    'pdbMsOverride', {[], [], []});
+[kF, ueF, scF] = runSim(cF);
+
+assert(scF.nFlow == 3 && isequal([scF.flows.lcid], [4 5 6]), 'three flows must resolve to three LCIDs');
+assert(ueF(1).lch.nLch == 3, 'the transmitting UE must have one logical channel per flow, got %d', ueF(1).lch.nLch);
+assert(isequal(ueF(1).flowCount, [40 40 40]), ...
+    'each generator must stop at its own nPackets, got %s', mat2str(ueF(1).flowCount));
+assert(kF.nGenerated == 120, 'three generators of 40 must produce 120 packets, got %d', kF.nGenerated);
+assert(kF.nInFlight == 0, 'the auto run length must be long enough to resolve every packet, got %d left', kF.nInFlight);
+
+% Every packet belongs to exactly one flow, and each flow is scored against ITS OWN PDB.
+assert(numel(kF.byFlow) == 3, 'kpiReport must report one row per flow');
+assert(sum([kF.byFlow.nResolved]) == kF.nResolved, 'the per-flow rows must partition the resolved packets');
+assert(isequal([kF.byFlow.pdbMs], [100 20 200]), 'each flow must carry its own PQI''s PDB, got %s', mat2str([kF.byFlow.pdbMs]));
+for f = 1:3
+    b = kF.byFlow(f);
+    assert(all(b.latencyMs <= b.pdbMs), 'LCID %d: a delivered packet exceeded its own %g ms PDB', b.lcid, b.pdbMs);
+end
+% The whole point of multiplexing: one transport block carries SDUs from several flows, so the
+% run spends FEWER transmissions than it delivers packets. A harness that had quietly serialised
+% the flows onto one channel could not produce this.
+assert(kF.nTransmissions < kF.nDelivered, ...
+    'multiplexed flows must deliver more packets than transmissions spent, got %d tx for %d delivered', ...
+    kF.nTransmissions, kF.nDelivered);
+
+% A byte budget too small for a channel's next SDU must be RECLAIMED, not wasted: without that
+% a three-flow grant serves one SDU and idles most of its transport block. Measured against the
+% offered load rather than a magic number.
+offeredBytes = sum(arrayfun(@(x) x.nPackets * x.sizeBytes, scF.flows));
+carried      = sum(arrayfun(@(b) b.nDelivered * b.sizeBytes, kF.byFlow));
+assert(carried / offeredBytes > 0.85, ...
+    'the grant must be filled, not left part empty by rounding: only %.0f%% of the offered bytes were carried', ...
+    100 * carried / offeredBytes);
+
+% Two flows may not share a logical channel -- the receiver has nothing else to tell them apart.
+cDup = cF; cDup.app.flows(2).lcid = 4;
+try
+    harness.sls.scenarioFromConfig(cDup);
+    error('test_sls:noDupCheck', 'two flows sharing an LCID must be rejected');
+catch e
+    assert(strcmp(e.identifier, 'sls:scenarioInit:duplicateLcid'), ...
+        'expected sls:scenarioInit:duplicateLcid, got %s', e.identifier);
+end
+
+% An unbounded generator cannot have its run length inferred, and must say so rather than
+% silently picking one.
+cInf = cF; cInf.sim.nSlots = []; cInf.app.flows(1).nPackets = inf;
+try
+    runSim(cInf);
+    error('test_sls:noInfCheck', 'auto length with an infinite generator must be rejected');
+catch e
+    assert(strcmp(e.identifier, 'runSim:unboundedTraffic'), ...
+        'expected runSim:unboundedTraffic, got %s', e.identifier);
+end
 
 fprintf('test_sls: all assertions passed.\n');
 end

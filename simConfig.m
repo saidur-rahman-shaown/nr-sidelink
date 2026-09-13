@@ -52,11 +52,26 @@ c.pool.crLimitByLevel      = [1.0 0.6 0.3 0.12 0.05]; % sl-CR-Limit per CBR leve
 % =====================================================================================
 % APPLICATION: what traffic the transmitting UEs generate
 % =====================================================================================
-c.app.pqi            = 55;    % PC5 5QI -> priority and PDB come from +cfg/pqiTable
-c.app.periodMs       = 100;   % generation period (CAM-like)
-c.app.sizeBytes      = 300;   % SDU payload size
-c.app.lcid           = 4;     % logical channel id (Table 6.2.4-1: 4..19 is STCH)
-c.app.pdbMsOverride  = [];    % [] uses the PQI's own PDB; set a number to override it
+% ONE ENTRY PER GENERATOR. Each is an independent application flow mapped to its own sidelink
+% logical channel (STCH), and every transmitting UE runs all of them -- which is the case
+% TS 38.321 clause 5.22.1.4.1's logical channel prioritisation exists for. Add or remove rows
+% freely; the only rule is that each needs its own LCID.
+%
+%   pqi        PC5 5QI. Priority and PDB come from +cfg/pqiTable -- see it for the rows.
+%              55 = 100 ms PDB / prio 6, 70 = 20 ms / prio 3, 89 = 200 ms / prio 3.
+%   periodMs   generation period. Must be a whole number of slots at c.pool.mu.
+%   sizeBytes  SDU payload size.
+%   lcid       logical channel ID. Table 6.2.4-1: 4..19 is STCH. Must be distinct per flow.
+%   nPackets   how many packets this generator produces, then stops. inf runs for the whole
+%              simulation. A finite count is what makes c.sim.nSlots = [] work: the run
+%              lengthens itself to generate them all and then drain.
+%   pdbMsOverride  [] uses the PQI's own PDB; a number overrides it.
+c.app.flows(1) = struct('pqi', 55, 'periodMs', 100, 'sizeBytes', 300, 'lcid', 4, ...
+                        'nPackets', 600, 'pdbMsOverride', []);
+c.app.flows(2) = struct('pqi', 70, 'periodMs', 100, 'sizeBytes', 190, 'lcid', 5, ...
+                        'nPackets', 600, 'pdbMsOverride', []);
+c.app.flows(3) = struct('pqi', 89, 'periodMs', 100, 'sizeBytes', 450, 'lcid', 6, ...
+                        'nPackets', 600, 'pdbMsOverride', []);
 
 % =====================================================================================
 % SELECTION POLICY: the part the spec leaves to UE implementation
@@ -71,7 +86,12 @@ c.app.pdbMsOverride  = [];    % [] uses the PQI's own PDB; set a number to overr
 c.policy.decodeMarginSlots = 2;    % slots reserved for the receiver to decode.
                                    %   T2 = remaining PDB - this
 c.policy.mcs               = 7;    % I_MCS (QPSK at 7 in every selectable table)
-c.policy.prsvpTxMs         = 100;  % P_rsvp_TX, the reservation period
+% P_rsvp_TX, the reservation period. THE MOST CONSEQUENTIAL KNOB HERE when there are several
+% flows: one periodic grant offers one transport block per period, so the pool of capacity a UE
+% has is maxTBS/P_rsvp_TX bytes per second. Set it longer than the shortest flow period and the
+% tight flows expire waiting for an opportunity, however good the radio link is -- runSim
+% prints offered load against grant capacity every run so this is visible rather than inferred.
+c.policy.prsvpTxMs         = 50;    % three 100 ms flows offer 9.4 kB/s; 100 ms would cap at 8.3
 c.policy.numRetx           = 1;    % blind retransmissions beyond the initial transmission
 
 % =====================================================================================
@@ -93,7 +113,9 @@ c.radio.speedKmh      = 120;      % must equal blerTable's .meta.speedKmh
 % =====================================================================================
 % RUN
 % =====================================================================================
-c.sim.nSlots  = 4000;   % PHYSICAL slots. At mu=1 a slot is 0.5 ms, so 4000 = 2 s.
+c.sim.nSlots  = [];     % [] = AUTO: long enough for every finite-nPackets generator to finish
+                        % and for the last packet to resolve. Set a number to force a length --
+                        % PHYSICAL slots, so at mu=1 a slot is 0.5 ms and 4000 = 2 s.
                         % Runs may exceed the 20480-slot DFN period (10.24 s at mu=1) freely --
                         % harness.sls.slotToLogical carries the logical numbering across the
                         % wrap rather than resetting it. Cost is roughly linear: about 5 s of

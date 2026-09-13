@@ -69,17 +69,57 @@ kpi.latencyP90Ms = pct(latencyMs, 90);
 kpi.latencyP99Ms = pct(latencyMs, 99);
 kpi.latencyMaxMs = maxOrNaN(latencyMs);
 kpi.accessMeanMs = mean(accessMs);
-kpi.withinPdb    = mean(latencyMs <= scen.traffic.pdbMs);
+% Against EACH PACKET'S OWN PDB, read off the context rather than off the scenario. With
+% several flows there is no single scenario-wide PDB, and using one flow's would score another
+% flow's packets against a budget that was never theirs.
+kpi.withinPdb    = mean(latencyMs <= double([delivered.pdbMs]));
 
 % Throughput: delivered payload over wall-clock time. Payload only -- MAC subheaders and
 % padding are overhead, not goodput, and counting them makes a bigger PDU look like a faster
 % link.
 runMs = nSlots * msPerSlot;
-kpi.goodputKbps  = kpi.nDelivered * scen.traffic.sizeBytes * 8 / runMs;
+kpi.goodputKbps  = sum(double([delivered.sizeBytes])) * 8 / runMs;
 kpi.perUeKbps    = kpi.goodputKbps / scen.nUe;
 % Transmissions spent per delivered packet: the efficiency figure blind retransmission moves.
 kpi.txPerDelivery = nTransmissions / max(1, kpi.nDelivered);
 kpi.nTransmissions = nTransmissions;
+
+% ---- per FLOW ------------------------------------------------------------
+% One row per logical channel, because a flow is what an application owns: an aggregate that
+% mixes a 20 ms safety message with a 500 ms status update reports a latency distribution that
+% describes neither. Every flow is scored against ITS OWN PDB. The rows come from the scenario,
+% not from the packets, so a flow that delivered nothing still appears -- as a row of zeros,
+% which is the result, rather than by vanishing from the table.
+kpi.byFlow = repmat(flowKpiTemplate(), 1, numel(scen.flows));
+for f = 1:numel(scen.flows)
+    fl   = scen.flows(f);
+    mine = [resolved.lcid] == fl.lcid;
+    dOk  = mine & outcomes == codes.delivered;
+    lat  = double([resolved(dOk).tRxSlot] - [resolved(dOk).tGenSlot]) * msPerSlot;
+    kpi.byFlow(f).lcid        = fl.lcid;
+    kpi.byFlow(f).pqi         = fl.pqi;
+    kpi.byFlow(f).prio        = fl.prio;
+    kpi.byFlow(f).pdbMs       = fl.pdbMs;
+    kpi.byFlow(f).periodMs    = fl.periodMs;
+    kpi.byFlow(f).sizeBytes   = fl.sizeBytes;
+    kpi.byFlow(f).nDelivered  = nnz(dOk);
+    kpi.byFlow(f).nExpired    = nnz(mine & outcomes == codes.pdbExpired);
+    kpi.byFlow(f).nMaxTx      = nnz(mine & outcomes == codes.maxTx);
+    kpi.byFlow(f).nDropped    = nnz(mine & outcomes == codes.dropped);
+    kpi.byFlow(f).nResolved   = nnz(mine);
+    kpi.byFlow(f).latencyMs   = lat;
+    kpi.byFlow(f).latencyMeanMs = mean(lat);
+    kpi.byFlow(f).latencyP50Ms  = pct(lat, 50);
+    kpi.byFlow(f).latencyP90Ms  = pct(lat, 90);
+    kpi.byFlow(f).latencyP99Ms  = pct(lat, 99);
+    kpi.byFlow(f).latencyMaxMs  = maxOrNaN(lat);
+    kpi.byFlow(f).withinPdb   = mean(lat <= fl.pdbMs);
+    kpi.byFlow(f).goodputKbps = nnz(dOk) * fl.sizeBytes * 8 / runMs;
+    kpi.byFlow(f).prr         = nnz(dOk) / max(1, nnz(mine));
+end
+assert(sum([kpi.byFlow.nResolved]) == kpi.nResolved, ...
+    'kpiReport: every resolved packet must belong to exactly one flow -- %d across flows vs %d resolved', ...
+    sum([kpi.byFlow.nResolved]), kpi.nResolved);
 
 % ---- PRR versus distance, the per-LINK statistic -------------------------
 % kpi.prr above is PACKET-level: a packet counts as delivered if ANY receiver decoded it. That
@@ -125,4 +165,11 @@ end
 
 function v = maxOrNaN(x)
 if isempty(x), v = NaN; else, v = max(x); end
+end
+
+function t = flowKpiTemplate()
+t = struct('lcid', 0, 'pqi', 0, 'prio', 0, 'pdbMs', 0, 'periodMs', 0, 'sizeBytes', 0, ...
+    'nDelivered', 0, 'nExpired', 0, 'nMaxTx', 0, 'nDropped', 0, 'nResolved', 0, ...
+    'latencyMs', zeros(1, 0), 'latencyMeanMs', NaN, 'latencyP50Ms', NaN, 'latencyP90Ms', NaN, ...
+    'latencyP99Ms', NaN, 'latencyMaxMs', NaN, 'withinPdb', NaN, 'goodputKbps', 0, 'prr', NaN);
 end

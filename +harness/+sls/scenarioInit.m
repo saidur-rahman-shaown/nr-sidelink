@@ -114,19 +114,15 @@ scen.pool = struct( ...
     'cbrRangeUpperBounds', ovGet(ov, 'cbrRangeUpperBounds', [0.2 0.4 0.6 0.8 1.0]), ...  % one SL-CBR-LevelsConfig, as ratios
     'crLimitByLevel', ovGet(ov, 'crLimitByLevel', [1.0 0.6 0.3 0.12 0.05]));        % sl-CR-Limit per CBR level, pre-resolved       % sl-PreemptionEnable-r16; '' disables it entirely                      % not configured: never fires on unused periods
 
-% ---- traffic ---------------------------------------------------------------
-pqi = ovGet(ov, 'pqi', 55);              % CAM-like periodic awareness, the pqiTable default row
-t   = cfg.pqiTable();
-row = t([t.PQI] == pqi);
-scen.traffic = struct( ...
-    'pqi',         pqi, ...
-    'prio',        row.priority, ...
-    'pdbMs',       ovGet(ov, 'pdbMsOverride', row.PDB_ms), ...
-    'periodSlots', ovGet(ov, 'periodMs', 100) * scen.slotsPerMs, ...
-    'sizeBytes',   ovGet(ov, 'sizeBytes', 300), ...
-    'lcid',        ovGet(ov, 'lcid', 4), ...
-    'pbrBytesPerSec', 300 * 10, ...      % sl-PrioritisedBitRate: one 300-byte CAM per 100 ms
-    'bsdSeconds',     0.1);              % sl-BucketSizeDuration, so the bucket holds one CAM
+% ---- traffic: one or more FLOWS, each on its own logical channel -----------
+% A flow is one application generator mapped to one STCH. Several of them on one UE is the
+% case clause 5.22.1.4.1's logical channel prioritisation exists for, and the MAC SAP has been
+% multi-channel since +sap/lchInit -- only this harness was single-flow. The scalar `pqi`,
+% `periodMs`, `sizeBytes` and `lcid` overrides remain as the shorthand for the one-flow case;
+% passing `flows` supersedes them. They are a shorthand, not a second source of truth: they
+% build flows(1) and are then never read again.
+scen.flows = buildFlows(ov, scen.slotsPerMs);
+scen.nFlow = numel(scen.flows);
 
 % ---- transport block size, from the real clause 8.1.3.2 arithmetic ---------
 % L_subCH is DERIVED here, not taken from policy.defaults: the default is a documented stand-in
@@ -200,12 +196,29 @@ end
 % parts. Clause 6.2.4 gives every subPDU its own subheader, so a PDU carrying two SDUs costs
 % more than one carrying one; a single measured constant would understate a multi-SDU PDU and
 % size the grant too small for it.
+%
+% The probe SIZE matters, because clause 6.1.2's subheader is not a constant width: the F field
+% selects an 8-bit or a 16-bit L field, so a 100-byte SDU costs one byte less than a 200-byte
+% one. The probe therefore runs at the WIDEST subheader any configured flow will produce -- the
+% largest SDU size, or 128 bytes if that is larger than any flow, since 128 is where L widens.
+% Sizing the grant off a narrow-L measurement and then transmitting a wide-L PDU is a one-byte
+% overrun, and mac.muxSlSch errors rather than truncating.
 probeBytes = tbsBytesByLsubCH(end);
+probeSize  = max(128, max([scen.flows.sizeBytes]));
+% Two of them must fit in the probe, or the increment cannot be measured at all. When they do
+% not -- a payload more than half the largest transport block -- the probe shrinks to the
+% largest size that does fit, which is still at or above 128 and so still the wide-L case.
+if 2 * probeSize + 32 > probeBytes
+    probeSize = floor((probeBytes - 32) / 2);
+end
+if probeSize < 128
+    error('sls:scenarioInit:probeTooSmall', 'scenarioInit: the largest transport block (%d bytes) cannot hold two 128-byte SDUs, so the per-SDU overhead cannot be measured', probeBytes);
+end
 oh = zeros(1, 2);
 for nSdu = 1:2
-    len = repmat(scen.traffic.sizeBytes, 1, nSdu);
+    len = repmat(probeSize, 1, nSdu);
     [~, nPad, nInc] = mac.muxSlSch(1, 2, uint8(zeros(1, sum(len))), len, ...
-        repmat(scen.traffic.lcid, 1, nSdu), false, 0, 0, probeBytes);
+        repmat(scen.flows(1).lcid, 1, nSdu), false, 0, 0, probeBytes);
     if nInc ~= nSdu
         error('sls:scenarioInit:probeFailed', 'scenarioInit: the %d-SDU overhead probe carried %d SDUs', nSdu, nInc);
     end
@@ -223,9 +236,10 @@ scen.tbsBytesByLsubCH        = tbsBytesByLsubCH;
 scen.maxTbsBytes             = tbsBytesByLsubCH(end);
 
 % Sanity: one SDU must fit somewhere in the table, or no grant can ever carry this traffic.
-onePdu = scen.macOverheadFixedBytes + scen.macOverheadPerSduBytes + scen.traffic.sizeBytes;
+biggest = max([scen.flows.sizeBytes]);
+onePdu  = scen.macOverheadFixedBytes + scen.macOverheadPerSduBytes + biggest;
 if onePdu > scen.maxTbsBytes
-    error('sls:scenarioInit:sduTooLarge', 'scenarioInit: a %d-byte MAC PDU (a %d-byte SDU plus overhead) does not fit even L_subCH = %d (%d bytes) at MCS %d', onePdu, scen.traffic.sizeBytes, scen.numSubchannel, scen.maxTbsBytes, scen.policy.mcs);
+    error('sls:scenarioInit:sduTooLarge', 'scenarioInit: a %d-byte MAC PDU (a %d-byte SDU plus overhead) does not fit even L_subCH = %d (%d bytes) at MCS %d', onePdu, biggest, scen.numSubchannel, scen.maxTbsBytes, scen.policy.mcs);
 end
 
 scen.nUe      = nUe;
@@ -272,7 +286,13 @@ scen.policy.maxEscalations = ceil((strongestRsrpDbm - min(scen.pool.thresholdLis
 % clause 5.22.1.2a's pre-emption check can NEVER fire, by construction. Leaving priority a
 % scalar would make that structural impossibility look like a wiring bug, and would make it
 % impossible to tell the two apart.
-scen.prioByUe = repmat(scen.traffic.prio, 1, nUe);
+% The priority of a UE's TRANSMISSION, which is not the same thing as the priority of a logical
+% channel. Clause 5.22.1.4.1.1's sl-Priority is per channel and drives LCP; the priority in
+% SCI-1A -- the one sensing, the RSRP thresholds, CR limits and pre-emption all compare -- is
+% the priority of the data being sent, so with several flows multiplexed it is the HIGHEST of
+% them (numerically the lowest). Derived here so a single-flow scenario is unchanged, and left
+% as a plain vector so a caller can override it per UE to build a mixed-priority population.
+scen.prioByUe = repmat(min([scen.flows.prio]), 1, nUe);
 
 % ---- the one source of randomness -----------------------------------------
 % Every module below takes its draws as inputs; this is where they come from, and a seed
@@ -288,6 +308,85 @@ function v = ovGet(ov, name, dflt)
 %placeholder [] for a value it does not wish to set (pdbMsOverride uses exactly that).
 if isfield(ov, name) && ~isempty(ov.(name))
     v = ov.(name);
+else
+    v = dflt;
+end
+end
+
+function flows = buildFlows(ov, slotsPerMs)
+%buildFlows Resolve the traffic FLOWS: one application generator per sidelink logical channel.
+%Spec:   the flow itself is ours, but every field it resolves is not -- pqi/prio/pdbMs come from
+%        TS 23.287 clause 5.4.4 Table 5.4.4-1 via +cfg/pqiTable, lcid is TS 38.321 Table 6.2.4-1
+%        (4..19 is STCH), and pbr/bsd are clause 5.22.1.4.1.1's sl-PrioritisedBitRate and
+%        sl-BucketSizeDuration.
+%Inputs: ov          the override struct. `flows` supersedes the scalar shorthand
+%        slotsPerMs  integer -- for the numerology conversion
+%Outputs: flows  1 x nFlow struct array, one per logical channel
+%
+%WHY EVERY FLOW NEEDS A DISTINCT LCID
+%-------------------------------------
+%+sap/lchInit requires it, and so does the receiver: mac.demuxSlSch hands each subPDU back with
+%its LCID and nothing else distinguishes two flows sharing one. Two generators on one LCID are
+%one logical channel with twice the arrival rate, which is a different experiment.
+
+if isfield(ov, 'flows') && ~isempty(ov.flows)
+    raw = ov.flows;
+else
+    % The one-flow shorthand. Identical in effect to a one-element `flows`, and kept because
+    % most scenarios are single-flow and should not have to write a struct array to say so.
+    raw = struct('pqi', ovGet(ov, 'pqi', 55), 'periodMs', ovGet(ov, 'periodMs', 100), ...
+        'sizeBytes', ovGet(ov, 'sizeBytes', 300), 'lcid', ovGet(ov, 'lcid', 4), ...
+        'pdbMsOverride', ovGet(ov, 'pdbMsOverride', []), 'nPackets', ovGet(ov, 'nPackets', inf));
+end
+
+t = cfg.pqiTable();
+flows = repmat(flowTemplate(), 1, numel(raw));
+for f = 1:numel(raw)
+    r = raw(f);
+    pqi = fGet(r, 'pqi', 55);
+    row = t([t.PQI] == pqi);
+    if isempty(row)
+        error('sls:scenarioInit:unknownPqi', 'buildFlows: flow %d asks for PQI %d, which is not a row of cfg.pqiTable', f, pqi);
+    end
+    periodMs = fGet(r, 'periodMs', 100);
+    if ~(periodMs > 0 && mod(periodMs * slotsPerMs, 1) == 0)
+        error('sls:scenarioInit:badPeriod', 'buildFlows: flow %d has periodMs %g, which is not a whole number of slots at this numerology', f, periodMs);
+    end
+    flows(f).lcid        = fGet(r, 'lcid', 3 + f);      % Table 6.2.4-1: STCH starts at 4
+    flows(f).pqi         = pqi;
+    flows(f).prio        = row.priority;
+    flows(f).pdbMs       = fGet(r, 'pdbMsOverride', row.PDB_ms);
+    flows(f).periodMs    = periodMs;
+    flows(f).periodSlots = periodMs * slotsPerMs;
+    flows(f).sizeBytes   = fGet(r, 'sizeBytes', 300);
+    flows(f).nPackets    = fGet(r, 'nPackets', inf);
+    % sl-PrioritisedBitRate defaults to exactly this flow's own arrival rate, so the first
+    % (SBj-limited) pass of clause 5.22.1.4.1.2 can carry the flow's steady-state load and no
+    % more. Leaving it at zero makes the buckets inert and hands everything to the second pass;
+    % setting it far above the arrival rate makes the first pass unbounded and the priority
+    % ordering between flows stops meaning anything.
+    flows(f).pbrBytesPerSec = fGet(r, 'pbrBytesPerSec', flows(f).sizeBytes * 1000 / periodMs);
+    flows(f).bsdSeconds     = fGet(r, 'bsdSeconds', periodMs / 1000);
+end
+
+if numel(unique([flows.lcid])) ~= numel(flows)
+    error('sls:scenarioInit:duplicateLcid', 'buildFlows: every flow needs its own logical channel, got LCIDs %s', mat2str([flows.lcid]));
+end
+if any([flows.lcid] < 4 | [flows.lcid] > 19)
+    error('sls:scenarioInit:notStch', 'buildFlows: STCH is LCID 4..19 in Table 6.2.4-1, got %s', mat2str([flows.lcid]));
+end
+end
+
+function f = flowTemplate()
+f = struct('lcid', 4, 'pqi', 55, 'prio', 5, 'pdbMs', 100, 'periodMs', 100, ...
+    'periodSlots', 200, 'sizeBytes', 300, 'nPackets', inf, ...
+    'pbrBytesPerSec', 3000, 'bsdSeconds', 0.1);
+end
+
+function v = fGet(r, name, dflt)
+%fGet One field of a flow spec, or its default. Empty counts as absent, as in ovGet.
+if isfield(r, name) && ~isempty(r.(name))
+    v = r.(name);
 else
     v = dflt;
 end

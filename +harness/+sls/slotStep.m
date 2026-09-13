@@ -59,12 +59,28 @@ end
 periodLogical = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, scen.TmaxPrime);
 
 % ---- 2. APP: generate, and cross the MAC SAP ------------------------------
+% One generator per flow, each on its own logical channel and its own phase. The packet's
+% priority and PDB are the FLOW's, not the UE's: ue(i).prio is the priority of a transmission
+% (see ueInit), and a PDU multiplexing two flows carries packets of two different priorities
+% and two different deadlines. Taking either from the UE would give every packet the tightest
+% flow's deadline and make the other flow's PDB unmeasurable.
 for i = 1:nUe
-    if scen.txUeMask(i) && app.trafficPeriodic(nPhys, scen.traffic.periodSlots, ue(i).trafficOffset)
-        c = sap.ctxInit(ue(i).nextPktId, ue(i).srcL2Id, ue(i).dstL2Id, scen.traffic.pqi, ...
-            ue(i).prio, scen.traffic.pdbMs, scen.traffic.sizeBytes, scen.traffic.lcid, nPhys);
-        ue(i).lch       = sap.lchEnqueue(ue(i).lch, c, nPhys);
-        ue(i).nextPktId = ue(i).nextPktId + 1;
+    if ~scen.txUeMask(i)
+        continue;
+    end
+    for f = 1:scen.nFlow
+        fl = scen.flows(f);
+        if ue(i).flowCount(f) >= fl.nPackets
+            continue;              % this generator has produced its quota and has stopped
+        end
+        if ~app.trafficPeriodic(nPhys, fl.periodSlots, ue(i).flowOffset(f))
+            continue;
+        end
+        c = sap.ctxInit(ue(i).nextPktId, ue(i).srcL2Id, ue(i).dstL2Id, fl.pqi, ...
+            fl.prio, fl.pdbMs, fl.sizeBytes, fl.lcid, nPhys);
+        ue(i).lch          = sap.lchEnqueue(ue(i).lch, c, nPhys);
+        ue(i).nextPktId    = ue(i).nextPktId + 1;
+        ue(i).flowCount(f) = ue(i).flowCount(f) + 1;
     end
 end
 
@@ -620,16 +636,59 @@ if opp == 1
     % that L_subCH is derived per selection, so a single scenario-wide TBS would be wrong for
     % every grant but one.
     tbsBytes = scen.tbsBytesByLsubCH(u.grant.lSubch);
-    usable   = tbsBytes - scen.macOverheadFixedBytes - scen.macOverheadPerSduBytes;
-    [alloc, u.lch.Sbj, ~] = mac.slLcp(u.lch.Sbj, u.lch.prio, avail, u.lch.harqFeedbackEnabled, ...
-        true(1, u.lch.nLch), usable);
-    [u.lch, served] = sap.lchDequeue(u.lch, alloc);
-    if isempty(served)
-        return;
+    % Clause 6.2.4 gives every subPDU its own subheader, so the room LCP may spend depends on
+    % how many SDUs it ends up choosing -- which is not known until it has chosen them. With one
+    % flow the answer was always one SDU and reserving one subheader was exact. With several it
+    % is not, and mac.muxSlSch ERRORS rather than truncating when the content overruns the
+    % transport block, so guessing low crashes the run mid-flight.
+    %
+    % So: reserve for n subheaders, ask LCP, count what it actually produced, and if the PDU
+    % would not fit, reserve for that many and ask again. Raising the reservation only ever
+    % shrinks the budget, so the SDU count is non-increasing and this terminates -- at the
+    % latest when the reservation covers every SDU LCP returned. The dequeue is done on a COPY
+    % until a fitting allocation is found, because +sap/ has no way to put an SDU back.
+    nReserve = 1;
+    served   = [];
+    fitted   = false;
+    for attempt = 1:u.lch.nLch + 2
+        usable = tbsBytes - scen.macOverheadFixedBytes - nReserve * scen.macOverheadPerSduBytes;
+        if usable < 1
+            break;
+        end
+        [alloc, sbjTrial, ~] = mac.slLcp(u.lch.Sbj, u.lch.prio, avail, u.lch.harqFeedbackEnabled, ...
+            true(1, u.lch.nLch), usable);
+        % slLcp's own header: "this function allocates BYTE BUDGETS per logical channel.
+        % Turning a byte budget into whole SDUs is the caller's job." This is that caller, and
+        % it used to skip the job -- handing the raw budgets to lchDequeue, which serves whole
+        % SDUs and silently discards the remainder of any budget too small for the next one.
+        % Measured on a three-flow UE: a budget of [229 190 405] against SDUs of [300 190 450]
+        % served ONE SDU and wasted 634 of 824 usable bytes, every period.
+        alloc = wholeSduAlloc(u.lch, alloc, usable);
+        [lchTrial, servedTrial] = sap.lchDequeue(u.lch, alloc);
+        if isempty(servedTrial)
+            break;
+        end
+        need = scen.macOverheadFixedBytes + numel(servedTrial) * scen.macOverheadPerSduBytes ...
+             + sum([servedTrial.sizeBytes]);
+        if need <= tbsBytes
+            u.lch     = lchTrial;
+            u.lch.Sbj = sbjTrial;
+            served    = servedTrial;
+            fitted    = true;
+            break;
+        end
+        nReserve = numel(servedTrial);
+    end
+    if ~fitted
+        return;                      % nothing pending fits this grant; the next one is wider
     end
     sduLen = [served.sizeBytes];
+    % Each SDU carries its OWN logical channel ID. A scenario-wide constant was indistinguishable
+    % from this while there was one flow, and silently mislabels every subPDU once there are
+    % two -- the receiver's mac.demuxSlSch reads the LCID back out of the subheader, so the
+    % whole delivery would be attributed to one flow.
     pdu = mac.muxSlSch(u.srcL2Id, u.dstL2Id, uint8(zeros(1, sum(sduLen))), sduLen, ...
-        repmat(scen.traffic.lcid, 1, numel(served)), false, 0, 0, tbsBytes);
+        [served.lcid], false, 0, 0, tbsBytes);
     % A Sidelink process whose buffer still holds an unresolved TB cannot take a new one --
     % clause 5.22.1.3.1a gives each process exactly one TB. Keying the process off nextPktId,
     % as this loop did, is not a cycle at all: nextPktId advances on GENERATION, so a TB built
@@ -819,14 +878,24 @@ end
 
 keptOk = u.grant.hasGrant && ~(u.grant.isPeriodic && u.grant.counter == 0 && ...
     ~mac.keepDecision(u.grant.keepDraw, scen.pool.slProbResourceKeep));
+% The last two conditions were hardcoded false, and with ONE flow whose period equalled
+% P_rsvp_TX that was harmless: a grant sized for that flow always accommodated its SDU, and an
+% opportunity every period always met a PDB equal to the period. Neither holds once flows
+% differ. A grant selected for a 100 ms / 100 ms flow offers an opportunity every 100 ms, so a
+% 20 ms-PDB flow arriving between them CANNOT be served by it and its packets simply expire --
+% which is what the clause's two implementation-choice conditions exist to prevent.
+%
+% Both are the "select not to segment / not to use a single MAC PDU" branch of their NOTE,
+% which is this UE's standing choice: there is no +rlc/, so segmentation is not available, and
+% reselecting is the only remedy either condition has.
 c = struct( ...
     'counterExpiredNotKept',  u.grant.hasGrant && u.grant.isPeriodic && u.grant.counter == 0 && ~keptOk, ...
     'poolReconfigured',       false, ...
     'noSelectedGrant',        ~u.grant.hasGrant, ...
     'noTxLastSecond',         false, ...
     'reselectAfterReached',   isfinite(scen.pool.slReselectAfter) && u.grant.consecutiveUnusedPeriods >= scen.pool.slReselectAfter, ...
-    'cannotAccommodateSdu',   false, ...
-    'pdbNotMet',              false);
+    'cannotAccommodateSdu',   grantTooSmall(u, scen), ...
+    'pdbNotMet',              grantMissesPdb(u, scen, nLog));
 if ~mac.reselectionTrigger(c)
     return;
 end
@@ -836,8 +905,13 @@ u.grant = mac.grantClear(u.grant);
 if ~any(avail > 0)
     return;
 end
-oldest  = u.lch.q(1);
-[remPhys, expired] = phy.rx.policy.remainingPdbSlots(oldest.pdbMs, oldest.tGenSlot, ...
+% The grant has to meet the TIGHTEST deadline in the queue, which is the earliest
+% tGenSlot + PDB and not necessarily the oldest packet: a flow generated later with a much
+% shorter PDB expires first. With one flow the two are the same packet, which is why taking the
+% head of the queue was correct until now and silently wrong the moment PDBs differ.
+[~, tightest] = min(double([u.lch.q.tGenSlot]) + double([u.lch.q.pdbMs]) * scen.slotsPerMs);
+urgent  = u.lch.q(tightest);
+[remPhys, expired] = phy.rx.policy.remainingPdbSlots(urgent.pdbMs, urgent.tGenSlot, ...
     harness.sls.slotToPhysical(scen, nLog), scen.mu, scen.decodeMarginSlots);
 if expired
     return;
@@ -848,12 +922,32 @@ end
 [lo, hi] = mac.creselCounterRange(scen.policy.prsvpTxMs);
 counter  = lo + floor(rand(scen.stream) * (hi - lo + 1));
 cresel   = mac.cresel(counter, true);
-% Size the grant from the data actually pending, capped at the largest transport block the
-% pool can carry. Clause 5.22.1.1 selects "an amount of frequency resources"; this is that
-% amount, and phy.rx.policy.selectionRequest turns it into L_subCH through the TBS table.
-nSdu     = numel(u.lch.q);
-pduBytes = min(scen.maxTbsBytes, ...
-    scen.macOverheadFixedBytes + nSdu * scen.macOverheadPerSduBytes + sum(avail));
+% Size the grant. Clause 5.22.1.1 selects "an amount of frequency resources" and leaves the
+% amount to the UE, so this is a policy choice, and it is the larger of two numbers:
+%
+%   what is pending RIGHT NOW, and
+%   what will arrive in ONE RESERVATION PERIOD once the grant is held.
+%
+% The second is the one that matters and the one this first omitted. A selected grant is
+% persistent -- it is reused for C_resel periods -- so sizing it from the instantaneous queue
+% freezes whatever happened to be queued at that instant into the width the UE then lives with.
+% With one flow whose period equalled P_rsvp_TX those were the same number. With three flows
+% they are not: measured, a UE sized its grant at 576 bytes against a 940-byte-per-period load
+% and then starved, delivering 49/100, 60/100 and 77/100 where each flow alone delivered
+% 100/100. Sizing for the arriving load fixes it at selection instead of hoping reselection
+% notices later.
+%
+% ceil, not the mean: a flow whose period is longer than the reservation period contributes a
+% whole SDU in the periods it does arrive in, and a grant sized for its average is too small in
+% exactly those periods.
+nSdu      = numel(u.lch.q);
+nowBytes  = scen.macOverheadFixedBytes + nSdu * scen.macOverheadPerSduBytes + sum(avail);
+perPeriod = scen.macOverheadFixedBytes;
+for f = 1:scen.nFlow
+    nArrive   = ceil(scen.policy.prsvpTxMs / scen.flows(f).periodMs);
+    perPeriod = perPeriod + nArrive * (scen.macOverheadPerSduBytes + scen.flows(f).sizeBytes);
+end
+pduBytes = min(scen.maxTbsBytes, max(nowBytes, perPeriod));
 [req, feasible] = phy.rx.policy.selectionRequest(nLog, scen.mu, remLogical, u.prio, cresel, scen.policy, pduBytes);
 if ~feasible
     return;
@@ -907,4 +1001,116 @@ crRatio = phy.ts38215.cr(subchUsedPast, 0, scen.numSubchannel, ...
 crPerPriority = zeros(1, 8);
 crPerPriority(u.prio) = crRatio;
 withinLimit = phy.ts38214.congestionControlCheck(crPerPriority, crLimitPerPriority, true(1, 8));
+end
+
+% =========================================================================
+function tooSmall = grantTooSmall(u, scen)
+%grantTooSmall Clause 5.22.1.2's "cannot accommodate a RLC SDU" condition.
+%The grant carries a fixed L_subCH chosen when it was selected. If the smallest MAC PDU that
+%would carry the head of any pending logical channel no longer fits that transport block --
+%because a flow with a larger payload has become the one waiting -- the grant cannot serve it,
+%and with no +rlc/ to segment with, the only remedy is to reselect a wider one.
+tooSmall = false;
+if ~u.grant.hasGrant || u.grant.lSubch < 1 || isempty(u.lch.q)
+    return;
+end
+tbsBytes = scen.tbsBytesByLsubCH(u.grant.lSubch);
+smallest = scen.macOverheadFixedBytes + scen.macOverheadPerSduBytes + ...
+    double(min([u.lch.q.sizeBytes]));
+tooSmall = smallest > tbsBytes;
+end
+
+% =========================================================================
+function misses = grantMissesPdb(u, scen, nLog)
+%grantMissesPdb Clause 5.22.1.2's "cannot fulfil the remaining PDB" condition.
+%The grant's transmission opportunities are fixed logical slots. If the FIRST one still ahead
+%of us lands after the tightest pending deadline, this grant cannot deliver that data whatever
+%happens, and holding it until its counter runs out simply expires the packet.
+%
+%Deliberately compared against the tightest deadline across the whole queue rather than the
+%head of it: with mixed PDBs the packet in danger is not the oldest one.
+misses = false;
+if ~u.grant.hasGrant || isempty(u.lch.q) || isempty(u.grant.txOppSlot)
+    return;
+end
+ahead = u.grant.txOppSlot(u.grant.txOppSlot >= nLog);
+if isempty(ahead)
+    return;                  % no opportunity left to judge; the period logic owns this grant
+end
+% Deadlines are PHYSICAL (tGenSlot is), the grant is LOGICAL, so the comparison is done in
+% logical slots -- the same conversion phy.rx.policy.pdbLogicalSlots makes for the window.
+nowPhys   = harness.sls.slotToPhysical(scen, nLog);
+deadPhys  = double([u.lch.q.tGenSlot]) + double([u.lch.q.pdbMs]) * scen.slotsPerMs;
+remPhys   = min(deadPhys) - nowPhys - scen.decodeMarginSlots;
+if remPhys <= 0
+    return;                  % already expired; +sap/lchExpire owns that, not reselection
+end
+[remLogical, ~] = phy.rx.policy.pdbLogicalSlots(scen.logicalOfPhys, ...
+    mod(nowPhys, numel(scen.logicalOfPhys)), remPhys);
+% NOTE 2 makes this condition an implementation CHOICE, and the choice has to be whether
+% reselecting would actually help. A grant cannot be improved on below T_proc,1: that is the
+% floor on when any newly selected resource could be used. Triggering anyway, as this first
+% did, thrashes -- the grant is cleared, a new one is selected that also cannot meet the
+% deadline, and it is cleared again on the next slot. Measured, that cost 69% of the UE's
+% transmission opportunities: 137 transmissions where 220 periods were available. The packet
+% expires either way; +sap/lchExpire owns that, and holding the grant at least serves the
+% flows whose deadlines it can still meet.
+if remLogical < phy.ts38214.procTimeSelection(scen.mu)
+    return;
+end
+misses = (ahead(1) - nLog) > remLogical;
+end
+
+% =========================================================================
+function alloc = wholeSduAlloc(lch, alloc, usable)
+%wholeSduAlloc Turn slLcp's per-channel BYTE BUDGETS into budgets that are whole SDUs.
+%Spec:   none directly -- clause 5.22.1.4.1.3 allocates resources to logical channels, and
+%        clause 5.22.1.4.1's NOTE leaves the SDU boundary to the UE. mac.slLcp deliberately
+%        stops at byte budgets so it stays free of queue structure; this is the other half.
+%Inputs: lch     the MAC SAP, +sap/lchInit -- for the queued SDU sizes
+%        alloc   1 x nLch real, bytes -- slLcp's allocation
+%        usable  the grant's usable bytes, the total the result may not exceed
+%Outputs: alloc  1 x nLch real, bytes -- each entry now the exact size of a whole number of
+%                that channel's oldest queued SDUs
+%
+%TWO SWEEPS, AND THE ORDER IS THE POINT
+%---------------------------------------
+%The first sweep spends only what slLcp gave each channel, in priority order: that is the
+%prioritised-bit-rate guarantee, and it must be honoured before anything else is served. The
+%second sweep offers whatever the first could not spend -- the remainder of every budget too
+%small for its channel's next SDU -- to the channels again in priority order. Without it the
+%grant goes out part empty while data waits, which is not a scheduling decision, just a
+%rounding loss.
+nLch = lch.nLch;
+[~, order] = sort(lch.prio);          % ascending numeric value == decreasing priority
+used = zeros(1, nLch);
+for k = order(:)'
+    sizes = double([lch.q(lch.qLch == k).sizeBytes]);
+    used(k) = takeWhole(sizes, alloc(k));
+end
+spare = usable - sum(used);
+for k = order(:)'
+    if spare <= 0
+        break;
+    end
+    sizes = double([lch.q(lch.qLch == k).sizeBytes]);
+    extra = takeWhole(sizes, used(k) + spare) - used(k);
+    used(k) = used(k) + extra;
+    spare   = spare - extra;
+end
+alloc = used;
+end
+
+function taken = takeWhole(sizes, budget)
+%takeWhole The bytes +sap/lchDequeue would actually serve from this channel for this budget.
+%It mirrors that function's rule EXACTLY, including the part that is not strict FIFO: it does
+%not stop at an SDU too large for the budget, because lchDequeue does not either -- a later,
+%smaller SDU on the same channel may still fit. Computing a budget under a different rule than
+%the one that spends it is how a grant ends up sized for SDUs that are never the ones served.
+taken = 0;
+for i = 1:numel(sizes)
+    if taken + sizes(i) <= budget
+        taken = taken + sizes(i);
+    end
+end
 end

@@ -42,7 +42,7 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
     +sap/        cross-layer SAP structs; the packet context and KPIs (built)
     +mac/        38.321 §5.22 TX + §5.22.2 RX, §6.1.6 mux/demux      (B8, built)
     +rf/         RF stage — our boundary, no 3GPP SAP exists         (built, thin)
-    +app/        traffic generation                                  (periodic only)
+    +app/        traffic generation                       (periodic; multi-flow via c.app.flows)
     +rlc/ +pdcp/ +sdap/ +pc5s/   upper layers                        (planned, B9)
     +harness/    +sls/ + +lls/ run; BLER measured, RMa channel       (B10, partial)
     +vec/ +test/ golden vectors and verification
