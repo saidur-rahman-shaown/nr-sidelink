@@ -357,5 +357,39 @@ for n = [20 50 80]
     assert(worst < cap, 'at %d UEs the worst UE holds %d of %d receive processes -- the entity is exhausted and dropping TBs', n, worst, cap);
 end
 
+%% ---- runs must cross the DFN wrap ---------------------------------------
+% The pool pattern repeats every 10240 ms -- 20480 slots at mu=1, only 10.24 s -- so any run
+% worth calling long crosses it. Before this was handled, asking for a longer run crashed with
+% "Index exceeds the number of array elements" out of the raw logicalOfPhys lookup: a bare
+% index into a one-period table. A 200 s run is an ordinary request, not an edge case.
+scW  = harness.sls.scenarioInit(2, 1);
+nDfn = numel(scW.logicalOfPhys);
+assert(nDfn == 20480, 'this test assumes the mu=1 DFN period of 20480 slots, got %d', nDfn);
+
+% The logical numbering must CONTINUE across the wrap, not reset. Every clause-8 window is a
+% DIFFERENCE of logical indices, so a numbering that reset would make any window straddling a
+% boundary compute a hugely negative span -- once every 10.24 s, sparsely and periodically,
+% which is close to the hardest failure shape to attribute.
+for pTest = [0, 5, nDfn - 1, nDfn, nDfn + 7, 3 * nDfn + 11, 399999]
+    lg = harness.sls.slotToLogical(scW, pTest);
+    assert(lg >= 0, 'every slot is in the baseline pool, so none may map to -1');
+    assert(harness.sls.slotToPhysical(scW, lg) == pTest, ...
+        'the mapping must round-trip across wraps: physical %d -> logical %d -> %d', ...
+        pTest, lg, harness.sls.slotToPhysical(scW, lg));
+end
+assert(harness.sls.slotToLogical(scW, nDfn) > harness.sls.slotToLogical(scW, nDfn - 1), ...
+    'the logical index must be monotone ACROSS the wrap, not reset to zero');
+
+% And a run that actually crosses it must complete and conserve packets.
+cW = simConfig();
+cW.sim.plot   = false;
+cW.sim.nSlots = round(2.5 * nDfn);          % 2.5 DFN periods, about 25 s
+kW = runSim(cW);
+assert(kW.nGenerated > 0, 'a 25 s run must generate traffic');
+assert(kW.nDelivered + kW.nExpired + kW.nInFlight == kW.nGenerated, ...
+    'conservation must hold across DFN wraps');
+assert(kW.nDelivered / kW.nGenerated > 0.9, ...
+    'delivery must not collapse at a wrap boundary, got %d of %d', kW.nDelivered, kW.nGenerated);
+
 fprintf('test_sls: all assertions passed.\n');
 end

@@ -48,7 +48,10 @@ nPreempt = 0;
 nCongestionDrop = 0;
 
 % ---- 1. TIMING ------------------------------------------------------------
-nLog = scen.logicalOfPhys(nPhys + 1);
+% Across DFN wraps: the pool pattern repeats every 10240 ms but the logical numbering does NOT
+% reset, or every clause-8 window straddling a boundary would compute a hugely negative span.
+% See harness.sls.slotToLogical.
+nLog = harness.sls.slotToLogical(scen, nPhys);
 if nLog < 0
     air = repmat(rf.toAir(sap.txReqInit(), 1, [0 0]), 1, 0);
     return;                                  % not a pool slot: nothing can happen in it
@@ -835,11 +838,12 @@ if ~any(avail > 0)
 end
 oldest  = u.lch.q(1);
 [remPhys, expired] = phy.rx.policy.remainingPdbSlots(oldest.pdbMs, oldest.tGenSlot, ...
-    scen.physOfLogical(nLog + 1), scen.mu, scen.decodeMarginSlots);
+    harness.sls.slotToPhysical(scen, nLog), scen.mu, scen.decodeMarginSlots);
 if expired
     return;
 end
-[remLogical, ~] = phy.rx.policy.pdbLogicalSlots(scen.logicalOfPhys, scen.physOfLogical(nLog + 1), remPhys);
+[remLogical, ~] = phy.rx.policy.pdbLogicalSlots(scen.logicalOfPhys, ...
+    mod(harness.sls.slotToPhysical(scen, nLog), numel(scen.logicalOfPhys)), remPhys);
 
 [lo, hi] = mac.creselCounterRange(scen.policy.prsvpTxMs);
 counter  = lo + floor(rand(scen.stream) * (hi - lo + 1));

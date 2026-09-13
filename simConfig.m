@@ -87,7 +87,11 @@ c.radio.hRxM          = 1.5;
 % =====================================================================================
 % RUN
 % =====================================================================================
-c.sim.nSlots  = 4000;   % PHYSICAL slots. At mu=1 a slot is 0.5 ms, so 4000 = 2 s
+c.sim.nSlots  = 4000;   % PHYSICAL slots. At mu=1 a slot is 0.5 ms, so 4000 = 2 s.
+                        % Runs may exceed the 20480-slot DFN period (10.24 s at mu=1) freely --
+                        % harness.sls.slotToLogical carries the logical numbering across the
+                        % wrap rather than resetting it. Cost is roughly linear: about 5 s of
+                        % wall clock per 20000 slots for a two-UE link.
 c.sim.seed    = 7;      % reproduces a run exactly
 c.sim.plot    = true;   % draw the latency and throughput figures
 c.sim.plotDir = '';     % '' shows the figures; a path saves PNGs there instead
