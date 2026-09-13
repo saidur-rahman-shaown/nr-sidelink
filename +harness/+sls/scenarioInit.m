@@ -79,8 +79,12 @@ scen.radio.plModel = harness.chanmodel.pathlossModel('rma', struct( ...
     'hTxM',    ovGet(ov, 'hTxM', 1.5), ...            % vehicle-mounted antenna
     'hRxM',    ovGet(ov, 'hRxM', 1.5)));
 scen.pCmaxDbm     = ovGet(ov, 'pCmaxDbm', 23);     % P_CMAX; slPowerControl is a max-power-always policy for now
-scen.channelModel = 'awgn';
-scen.speedKmh     = 0;
+% The BLER table is measured under ONE channel and speed, and harness.phyabs.blerLookup
+% raises rather than interpolating across models -- so these two are a KEY into that table,
+% not a knob that changes the propagation. Changing them without measuring a matching table
+% is an error by construction, which is the point.
+scen.channelModel = ovGet(ov, 'channelModel', 'awgn');
+scen.speedKmh     = ovGet(ov, 'speedKmh', 0);
 % PSCCH decodes further out than PSSCH because its code rate is far lower and does not move
 % with the data's -- NOT because it is narrower: +harness/+chanmodel/slotSinr shows signal and
 % noise scale together with the band, leaving the SNR identical. There is no

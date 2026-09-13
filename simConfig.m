@@ -83,6 +83,12 @@ c.radio.pCmaxDbm      = 23;
 c.radio.losMode       = 'los';    % 'los' or 'nlos' for the TR 38.901 RMa model
 c.radio.hTxM          = 1.5;      % antenna heights, metres
 c.radio.hRxM          = 1.5;
+% The small-scale channel is a KEY into the measured BLER table, not a free knob: the table in
+% +harness/+phyabs/blerTable was measured under exactly one model and speed, and blerLookup
+% raises rather than reading it off-key. To change these, measure a new table first --
+% +harness/CLAUDE.md has the procedure.
+c.radio.channelModel  = 'awgn';   % must equal blerTable's .meta.channelModel
+c.radio.speedKmh      = 0;        % must equal blerTable's .meta.speedKmh
 
 % =====================================================================================
 % RUN
