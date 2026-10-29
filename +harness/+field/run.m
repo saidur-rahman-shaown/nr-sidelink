@@ -27,7 +27,7 @@ function r = run(c)
 %LATENCY IS MEASURED FROM THE APPLICATION'S CLOCK. Each payload starts with an 8-byte application
 %header (packet id, message type, originating UE) -- the way an ITS PDU header identifies a
 %message -- so a receiver's delivery can be matched to its generation time without reading any
-%layer's internal state (INTEGRATION.md: KPIs close on application timestamps).
+%layer's internal state (docs/INTEGRATION.md: KPIs close on application timestamps).
 
 o = cfg.loadConfig(c.cfgPath, [c.cam.pqi c.denm.pqi c.uni.pqi]);
 k = stack.defaults();

@@ -1,6 +1,6 @@
 function S = ueStats(r)
 %ueStats Per-UE and per-flow statistics of a deployment run, every loss given a likely cause.
-%Spec:   none -- KPI definitions as in INTEGRATION.md and +experiments: a (packet, receiver) pair
+%Spec:   none -- KPI definitions as in docs/INTEGRATION.md and +experiments: a (packet, receiver) pair
 %        counts for every receiver within c.sim.rangeM of the source AT GENERATION TIME; it is on
 %        time if delivered within the packet's PDB; a flow meets its QoS when the on-time share is
 %        at least 1 - PER (PQI 58: 99 %, PQI 56: 90 %). Packets whose PDB runs past the end are excluded.

@@ -1,8 +1,7 @@
 function runPhyTests()
 %runPhyTests Run every +phy/ unit test built so far; error out if anything fails.
 %   Adds the repo root to the path from this file's own location, then runs
-%   each test function and reports a pass/fail summary -- same pattern as
-%   nrv2x-matlab/tests/runAllTests.m.
+%   each test function and reports a pass/fail summary.
 
 here = fileparts(mfilename('fullpath'));   % .../+test
 root = fileparts(here);                    % repo root

@@ -11,7 +11,7 @@ function [physOfLogical, logicalOfPhys, TmaxPrime] = poolAllSlots(mu)
 %
 %The three inputs this pins, and why each is the baseline
 %--------------------------------------------------------
-%  ssbMask   = all false. No slot is excluded for S-SSB. BUILD.md defers S-SSB end-to-end sync
+%  ssbMask   = all false. No slot is excluded for S-SSB. docs/BUILD.md defers S-SSB end-to-end sync
 %              explicitly ("an SLS with idealised sync ... is still useful"), so until there is
 %              a sync procedure to run there is no reason to reserve slots for it. This is the
 %              first of the three to change when sync is built.

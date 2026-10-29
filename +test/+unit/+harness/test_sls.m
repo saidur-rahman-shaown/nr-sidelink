@@ -58,7 +58,7 @@ assert(big.prrLink <= big.prr, 'link-level PRR cannot exceed packet-level PRR: a
 assert(big.prrLink < 0.99, 'over a 2 km line the far links must fail; a link PRR of ~1 means the pair statistic is not being collected');
 
 %% ---- PRR versus distance has the expected shape -------------------------
-% BUILD.md's B10 gate. Not a fixed curve -- that would pin the placeholder path loss model --
+% docs/BUILD.md's B10 gate. Not a fixed curve -- that would pin the placeholder path loss model --
 % but the shape: monotone non-increasing, high at the near end, ~zero at the far end.
 p = big.prrByDistance;
 valid = ~isnan(p);

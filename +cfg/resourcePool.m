@@ -2,7 +2,7 @@ function s = resourcePool(raw)
 %resourcePool Build SL-ResourcePool-r16 from its JSON-decoded raw struct.
 %Spec:   TS 38.331 clause 6.3.5, IE SL-ResourcePool-r16 (Release-16 baseline; see
 %        +cfg/CLAUDE.md scope decision -- Rel-17/18 extension-group fields are out of scope).
-%        Clause number is the +cfg/CLAUDE.md/BUILD.md best-effort citation for where sidelink
+%        Clause number is the +cfg/CLAUDE.md / docs/BUILD.md best-effort citation for where sidelink
 %        IEs live in 38.331; cross-check against the pinned version in specVersions.json
 %        before treating it as authoritative.
 %Inputs: raw  scalar struct from jsondecode(), one SL-ResourcePool-r16 JSON object (keys are

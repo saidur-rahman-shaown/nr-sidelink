@@ -43,7 +43,8 @@ regression cases — all passing in MATLAB.
 **The independent-verifier pass caught a real bug, not a hypothetical one**: `frivEncode`/
 `frivDecode`'s `maxReserve==3` branch was initially built with a linear summation term,
 matching both this session's own first PDF reading of TS 38.214 clause 8.1.5 *and*
-`nrv2x-matlab/phy/SidelinkResourceIndicator.m`'s independently-written implementation — two
+`nrv2x-matlab/phy/SidelinkResourceIndicator.m`'s independently-written implementation (an
+earlier prototype, removed from the repo 2026-10-28) — two
 supposedly-independent sources that turned out to share the identical error, because
 `pdftotext -layout` flattens the term's exponent onto a stray line right next to the summation,
 easy to drop in a fresh transcription either way. The correct formula squares that term. The
@@ -52,8 +53,8 @@ consistent way, exactly the failure mode `+test/CLAUDE.md` level 1 warns never p
 correctness. Only `independent-verifier`, deriving from spec text with zero code access, caught
 it (via glyph-position analysis of the PDF plus a bijectivity argument against clause
 8.3.1.1's own bit-width formula). Fixed; the corrected value (FRIV=157 for a specific worked
-case) is now a locked-in regression test. **Do not treat `nrv2x-matlab` as a validated
-cross-check for this specific formula** — it has the same bug.
+case) is now a locked-in regression test. The lesson stands without the
+prototype: two transcriptions agreeing is not verification.
 
 | Module | Clause | Contents |
 |---|---|---|

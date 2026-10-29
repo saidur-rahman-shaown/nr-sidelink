@@ -13,8 +13,8 @@ function [friv, bits] = frivEncode(nStart1, nStart2, LsubCH, Nsub, maxReserve)
 %tiles the codepoint space with the squared reading). The linear reading round-trips against
 %itself perfectly (encode and decode consistently wrong the same way) but does not match the
 %spec value -- caught only because independent-verifier derives from clause text, never from
-%this file. `nrv2x-matlab/phy/SidelinkResourceIndicator.m` has the identical bug; do not use it
-%to "confirm" this formula.
+%this file. An earlier prototype (nrv2x-matlab, since removed) had the identical bug: two
+%transcriptions agreeing is not a confirmation.
 %        LsubCH      integer, >=1, <=Nsub -- number of contiguously allocated sub-channels,
 %                    common to all N resources; known from the physical resource allocation
 %                    carrying the SCI, not decodable from FRIV itself (same reasoning as the

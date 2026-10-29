@@ -24,7 +24,7 @@ word "SAP" below.
 | `txReqValidate` | check one before it crosses the SAP |
 
 ## Why the context comes first, before any of the layers it crosses
-`INTEGRATION.md` puts this in Phase 0 rather than with the KPI work, because retrofitting
+`docs/INTEGRATION.md` puts this in Phase 0 rather than with the KPI work, because retrofitting
 per-packet instrumentation into a working stack is the step that reliably fails: by then the
 layers have been written to hand each other payloads, and threading a context through
 afterwards means touching every interface at once. Built first, it is just an argument
@@ -64,7 +64,7 @@ timestamp here is a physical slot index, converted to ms once, at report time, b
 ## "SAP" is being used loosely here, and only two of them are real
 3GPP names a Service Access Point at an inter-layer boundary: the **MAC SAP** carries *logical
 channels* (SBCCH, SCCH, STCH) and the **PHY SAP** carries *transport channels* (SL-BCH,
-SL-SCH). Those two are genuine. The RF and channel boundaries in `INTEGRATION.md` are our own
+SL-SCH). Those two are genuine. The RF and channel boundaries in `docs/INTEGRATION.md` are our own
 interfaces with the same discipline applied — there is no "RF SAP" in any specification. Do not
 go looking for one in TS 38.321.
 
@@ -72,7 +72,7 @@ go looking for one in TS 38.321.
 Deliberately **not** waveform-shaped. `.waveform` is one optional field, empty in the normal
 case: the system-level PHY works from the descriptor alone and never builds samples, the
 link-level PHY fills it in. That is what lets both fidelities sit behind one interface, which
-`INTEGRATION.md` names as the most consequential decision in the tree.
+`docs/INTEGRATION.md` names as the most consequential decision in the tree.
 
 - **Full 24-bit Layer-2 IDs, not the SCI's truncated ones.** SCI 2-A carries an 8-bit Source ID
   and a 16-bit Destination ID — the *LSBs*, with the MAC subheader carrying the complementary
@@ -105,7 +105,7 @@ The test round-trips all four through `phy.ts38212.sci2aPack`.
   value. The scenario decides it, not the SAP.
 
 ## Not built
-The other three structs `INTEGRATION.md` freezes — the RF SAP, the channel SAP and the RX SAP. They
+The other three structs `docs/INTEGRATION.md` freezes — the RF SAP, the channel SAP and the RX SAP. They
 land as the layers that need them do.
 
 ## Tests

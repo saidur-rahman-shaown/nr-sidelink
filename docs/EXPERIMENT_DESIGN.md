@@ -48,7 +48,7 @@ supported_parameters, reference_source, experiment_id, acceptance_rule,
 result_artifact, known_deviation
 ```
 
-Use the project's [specVersions.json](+cfg/specVersions.json) as the starting manifest, then
+Use the project's [specVersions.json](../+cfg/specVersions.json) as the starting manifest, then
 audit it. The PHY/MAC baseline is Release 16, while the current SDAP and QoS documents include
 Release 19 versions. Document which later text is used and why its relevant provisions apply.
 The current manifest's TR 37.885 and PC5-S entries are explicitly unverified placeholders.
@@ -80,10 +80,10 @@ examples exhausts every valid Cartesian combination.
 
 ## 3. Entry conditions for publication campaigns
 
-Resolve or explicitly exclude the affected claims for all six findings in
-[BUGS_TO_ADDRESS.md](BUGS_TO_ADDRESS.md). The recorded review run passed 36/37 test files and
-failed the 80-UE receive-process occupancy check. This is prior review evidence, not a new run
-performed for this plan.
+The six findings of the 2026-10-26 review (formerly BUGS_TO_ADDRESS.md) were all confirmed and
+fixed on 2026-10-28, each with a regression test in
+[test_reviewFixes.m](../+test/+unit/+harness/test_reviewFixes.m); the 80-UE receive-process
+check in `test_sls` now passes with zero drops. Summarised in `+harness/CLAUDE.md`, Known traps.
 
 Additional issues to address in the study design:
 

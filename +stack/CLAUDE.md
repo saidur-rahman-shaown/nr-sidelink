@@ -8,7 +8,7 @@ Those choices are all in `stack.defaults`, each with the clause that leaves it o
 
 Not wired into `+harness/+sls/`, whose system-level path is still abstracted (zero-filled
 payloads, no PDCP/SDAP). It **is** the UE of `+harness/+field/`: N UEs, real traffic, a real
-path-loss + fading channel (`runField`, `FIELD.md`).
+path-loss + fading channel (`runField`, `docs/FIELD.md`).
 
 ## The pipeline, transmit side (`stack.appSend` + `stack.txSlot`)
 

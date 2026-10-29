@@ -149,7 +149,7 @@ N_reserved, all twelve reserved indices, T'max, the first five pool slots and al
 - **Clause 8.2-8.6 remain out of scope** (CSI-RS/DM-RS/PT-RS transmission and reception
   procedures, CSI reporting) — not requested, not built.
 - **Cross-checked against prior art, not copied from it.** `nrv2x-matlab/phy/sensing/` (a
-  separate, non-normative legacy codebase in this same repo) has a spec-faithful sensing/
+  separate, non-normative legacy prototype, removed from the repo 2026-10-28) has a spec-faithful sensing/
   selection implementation, and `Documentations/Notes/08-Mode2-Conformance-Audit.md` audits a
   *different* legacy scheduler against the same 20-item checklist this package's `candidateSet`
   targets — both were read for cross-checking design and known pitfalls (half-duplex exclusion,

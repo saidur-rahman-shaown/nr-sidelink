@@ -1,6 +1,6 @@
 function s = report(r)
 %report Summarise a field run: per-message PRR and latency against the PDB, per-link SNR, MAC/PHY counters.
-%Spec:   none -- KPIs as INTEGRATION.md defines them: reliability = delivered within the PDB /
+%Spec:   none -- KPIs as docs/INTEGRATION.md defines them: reliability = delivered within the PDB /
 %        expected; latency = application delivery time - generation time, reported as
 %        percentiles against the PDB (never a mean alone); late deliveries counted as losses.
 %        A packet whose PDB runs past the end of the run is IN FLIGHT: reported, and excluded

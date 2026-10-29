@@ -30,7 +30,7 @@ FOR each slot n:
 ## Sub-packages
 `+lls/` full waveform, 1 to 3 UEs. `+sls/` abstracted PHY, many UEs. `+field/` full stack
 (`+stack/`, every layer from SDAP down) at waveform level for a handful of UEs with real traffic;
-see `FIELD.md`.
+see `docs/FIELD.md`.
 `+chanmodel/` TDL, CDL, and the 37.885 V2V models — **wrapped**, not part of the UE.
 `+mobility/` trajectory generation.
 
@@ -190,7 +190,7 @@ reliable long after the chain stops acquiring** (100% at −10 dB, 95% at −15 
 estimate degrades first and the PSBCH fails on the residual offset, which is the chain effect
 the conjunction exists to expose.
 
-The SLS still models sync as ideal, per `BUILD.md`'s deferral. Nothing in `+sls/` consumes
+The SLS still models sync as ideal, per `docs/BUILD.md`'s deferral. Nothing in `+sls/` consumes
 `+sync/`.
 
 ### The receiver SEARCHES; it is not handed the transmission list
@@ -549,7 +549,7 @@ that Phase 3 changes no caller. Adding a key later means regenerating every curv
 ## Superseded plan note
 `poolAllSlots` — the baseline Mode-2 resource pool, in which **every slot of the DFN
 period is a sidelink slot**. In Mode 2 there is no serving cell handing out a
-tdd-UL-DL-ConfigurationCommon, and `BUILD.md` defers S-SSB end-to-end sync explicitly, so
+tdd-UL-DL-ConfigurationCommon, and `docs/BUILD.md` defers S-SSB end-to-end sync explicitly, so
 nothing takes slots away and the pool is the whole period. Different pool configurations come
 later; this is the one the first end-to-end runs use.
 
@@ -625,7 +625,7 @@ the current distance, an optional TDL whose time is set to the slot's wall clock
 continuously although it is only exercised when its transmitter speaks), every transmitter
 summed at every receiver, and thermal noise per sample. `report` gives per-flow PRR and latency
 percentiles against the PDB, with packets still in flight at the end excluded, and attributes
-every lost copy to not-sent / half-duplex / collision / radio from the transmit log. `FIELD.md` is
+every lost copy to not-sent / half-duplex / collision / radio from the transmit log. `docs/FIELD.md` is
 the walkthrough and the field-by-field configuration reference.
 
 - **Doppler is double mobility.** The TDL speed is |v_i| + |v_j|, not the relative speed: the

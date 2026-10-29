@@ -10,11 +10,11 @@ and back up at the receiver.
 - `README.md` — orientation for a new reader: what the repo is, the packet flow from generation
   to reception, where to modify, how to run a simulation. Start there if you have not seen the
   tree before; this file is the working rules, not the tour.
-- `BUILD.md` — the master build sequence B0…B11, the gate for each package, and the dependency
+- `docs/BUILD.md` — the master build sequence B0…B11, the gate for each package, and the dependency
   graph. This is the plan of record for the *packages*.
-- `INTEGRATION.md` — the plan of record for the *connections between them*: the frozen SAPs, the
+- `docs/INTEGRATION.md` — the plan of record for the *connections between them*: the frozen SAPs, the
   phase order that closes the end-to-end loop, and where the latency and throughput KPIs come
-  from. Read with `BUILD.md`, not instead of it.
+  from. Read with `docs/BUILD.md`, not instead of it.
 - `.claude/rules/normative-packages.md` — what "normative" means here and the coding rules that
   follow from it (flat interfaces, no hidden state, no magic numbers, clause-cited headers).
 - `.claude/rules/portability.md` — the C/HDL port constraints (documented dynamic ranges,
@@ -65,16 +65,8 @@ subject to every rule in `.claude/rules/normative-packages.md`. `+phy/+rx/`, `+p
 expected there, but their interfaces to normative packages must stay flat, and a change there
 must never force a change on the normative side.
 
-## Do not use `nrv2x-matlab/`
-`nrv2x-matlab/` is an **earlier, unverified prototype** kept in-tree for reference only. None of
-it has been checked against the specs — no worked examples, no independent verification. It is
-not part of the build, not on the critical path, and must not be read, cited, ported, reused, or
-treated as a source of truth for anything in `+phy/`, `+mac/`, or `+cfg/`. When a question is
-"what does the spec say", the answer comes from the PDF in `Documentations/`, never from there.
-Ignore it in searches, audits, and reviews unless explicitly asked about it by name.
-
-The same caution, weaker, applies to `Documentations/Notes/*.md`: they are reformatted notes and
-have been caught dropping mathematics (a lost division bar in the `+mac/` counter-draw range, a
+## Spec notes are not the spec
+`Documentations/Notes/*.md` are reformatted notes, not the spec. They have been caught dropping mathematics (a lost division bar in the `+mac/` counter-draw range, a
 dropped exponent in `+phy/+ts38214/`). **Read the PDF for anything mathematical.**
 
 ## Session pattern
@@ -106,7 +98,7 @@ Results are always produced at full stack and waveform level (`.claude/rules/ful
 
 The abstracted system-level runs below are for debugging and cross-checks only:
     matlab -batch "k = harness.sls.run(50, 4000, 7); disp(k)"   % nUe, physical slots, seed
-    matlab -batch "r = runField();"   % 5 UEs, full stack at waveform level; edit fieldConfig.m. See FIELD.md
+    matlab -batch "r = runField();"   % 5 UEs, full stack at waveform level; edit fieldConfig.m. See docs/FIELD.md
     matlab -batch "experiments.runStudy()" % the three-part study in report/REPORT.md; figures in plots/study/
     matlab -batch "experiments.runAll()"   % the earlier detailed suite; figures in plots/experiments/
 

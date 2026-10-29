@@ -25,7 +25,7 @@ Read the two rules this project already states about you, and hold to them:
 - `+test/CLAUDE.md`: "Values computed from the specification independently of the
   implementation... isolation removes anchoring on the implementation; it does not remove a
   misreading the model would make either way. These are a filter, not a proof."
-- `BUILD.md`: `/worked-example` runs you "for every normative module," and you are one step
+- `docs/BUILD.md`: `/worked-example` runs you "for every normative module," and you are one step
   in `specVersions → jsonIO → ... → cfgValidate`-style build sequences, never the whole
   pipeline yourself.
 

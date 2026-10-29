@@ -172,7 +172,7 @@ because the five PHY specs divide the work along real functional lines.
 +test/         28 test files, four package runners
 +rlc/ +pdcp/ +sdap/ +pc5s/    upper layers — NOT BUILT
 Documentations/               the spec PDFs. The source of truth
-nrv2x-matlab/                 earlier unverified prototype — DO NOT USE
+docs/                         build plan, integration plan, field and experiment design, install
 ```
 
 ### Normative vs ours
@@ -368,8 +368,8 @@ that cannot be reproduced exactly is not a result.
 | `simConfig.m` | **the one file to edit** to define a scenario |
 | `runSim.m` | run that scenario and plot latency and throughput |
 | `CLAUDE.md` | the project guide: rules, layout, session pattern |
-| `BUILD.md` | the plan of record for **packages** — B0…B11 and their gates |
-| `INTEGRATION.md` | the plan of record for **connections** — the SAPs and phase order |
+| `docs/BUILD.md` | the plan of record for **packages** — B0…B11 and their gates |
+| `docs/INTEGRATION.md` | the plan of record for **connections** — the SAPs and phase order |
 | `<package>/CLAUDE.md` | **status, module table, known traps, what is deliberately not built** |
 | `+test/CLAUDE.md` | the four verification levels and what each does and does not prove |
 
@@ -439,7 +439,7 @@ carry the Doppler of a moving UE while the geometry does not move.
 Mode-2 simulator.
 
 **Sync in the SLS.** `+sync/` runs in the LLS only; the system level assumes ideal
-synchronisation, per `BUILD.md`'s explicit deferral.
+synchronisation, per `docs/BUILD.md`'s explicit deferral.
 
 **Smaller gaps:** SL-BSR / SR / CSI reporting *triggers* (cl. 5.22.1.5–.7), SL-BCH data transfer
 (cl. 5.23 — the PSBCH waveform exists, the MAC wrapper does not), conformance vectors, `+vec/`.
