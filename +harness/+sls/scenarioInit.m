@@ -56,7 +56,7 @@ scen.startRb       = 0;
 % ---- radio ----------------------------------------------------------------
 scen.radio = struct( ...
     'fcHz',          ovGet(ov, 'fcHz', 5.9e9), ...    % ITS band
-    'bwHz',          scen.nPrb * 12 * 30e3, ...   % PRBs x 12 subcarriers x 30 kHz
+    'bwHz',          scen.nPrb * 12 * 15e3 * 2^scen.mu, ...   % PRBs x 12 subcarriers x SCS (TS 38.211 4.2: 15 kHz x 2^mu)
     'noiseFigureDb', ovGet(ov, 'noiseFigureDb', 9), ...
     'plModel',       []);                % filled in below, once the geometry is known
 
@@ -73,11 +73,12 @@ scen.radio = struct( ...
 % LOS probability and there is no local PDF to extract it from, so a fixed mode is stated
 % rather than a recalled formula quietly applied. 'los' is the optimistic bound, 'nlos' the
 % pessimistic one, and the two bracket the real answer.
-scen.radio.plModel = harness.chanmodel.pathlossModel('rma', struct( ...
+scen.radio.plModel = harness.chanmodel.pathlossModel(ovGet(ov, 'plModel', 'rma'), struct( ...
     'fcHz',    scen.radio.fcHz, ...
     'losMode', ovGet(ov, 'losMode', 'los'), ...
     'hTxM',    ovGet(ov, 'hTxM', 1.5), ...            % vehicle-mounted antenna
-    'hRxM',    ovGet(ov, 'hRxM', 1.5)));
+    'hRxM',    ovGet(ov, 'hRxM', 1.5), ...
+    'antennaGainDb', ovGet(ov, 'antennaGainDb', 0)));
 scen.pCmaxDbm     = ovGet(ov, 'pCmaxDbm', 23);     % P_CMAX; slPowerControl is a max-power-always policy for now
 % The BLER table is measured under ONE channel and speed, and harness.phyabs.blerLookup
 % raises rather than interpolating across models -- so these two are a KEY into that table,
@@ -99,6 +100,9 @@ scen.policy = phy.rx.policy.defaults();
 scen.policy.mcs       = ovGet(ov, 'mcs', scen.policy.mcs);
 scen.policy.prsvpTxMs = ovGet(ov, 'prsvpTxMs', scen.policy.prsvpTxMs);
 scen.policy.numRetx   = ovGet(ov, 'numRetx', scen.policy.numRetx);
+scen.policy.t2MaxMs   = ovGet(ov, 't2MaxMs', scen.policy.t2MaxMs);
+scen.policy.sizeEventFlows = ovGet(ov, 'sizeEventFlows', scen.policy.sizeEventFlows);
+scen.policy.prepSlots = ovGet(ov, 'prepSlots', scen.policy.prepSlots);
 scen.pool = struct( ...
     'sensingWindowMs',  ovGet(ov, 'sensingWindowMs', 100), ...
     'thresholdListDbm', repmat(ovGet(ov, 'thresRsrpDbm', -110), 1, 64), ...   % sl-Thres-RSRP-List, pre-resolved
@@ -174,12 +178,25 @@ scen.decodeMarginSlots = ovGet(ov, 'decodeMarginSlots', 2);
 % in unicast only the addressed peer is. The case needing the SHORT bound is exactly the case
 % with many peers -- which is why a single bound for both was wrong. Measured at 50 UEs
 % broadcast over 2000 slots, worst single UE: 16 of 16 processes occupied at a 1600-slot bound,
-% 15 of 16 at 400, and 6 of 16 at 200.
-periodSlots = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, 10240 * 2^scen.mu);
+% 15 of 16 at 400, and 6 of 16 at 200 -- and 16 of 16 again at 80 UEs with 200, so broadcast now
+% uses TRIV's reach, the real bound on its copies.
+% An aperiodic grant (P_rsvp_TX = 0) is one TB and its chained retransmissions, all within TRIV's
+% 31-slot reach (TS 38.214 8.1.5), so a receive process unresolved after that is stale.
+TRIV_REACH_SLOTS = 31;
+if scen.policy.prsvpTxMs > 0
+    periodSlots = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, 10240 * 2^scen.mu);
+else
+    periodSlots = TRIV_REACH_SLOTS + 1;
+end
 if scen.isUnicast
     scen.rxProcStaleSlots = scen.slMaxTransNum * periodSlots;
 else
-    scen.rxProcStaleSlots = periodSlots;
+    % Every copy of a broadcast TB is chained to the anchor's SCI, so none arrives later than
+    % TRIV's reach after the last one heard: a process idle that long can never be completed.
+    % It used to be one reservation period (200 slots at 100 ms) -- six times longer than any copy
+    % can come -- and at 80 UEs the undecoded TBs of every audible neighbour held all 16 processes
+    % (BUGS_TO_ADDRESS BUG-02, test_sls seed 9).
+    scen.rxProcStaleSlots = TRIV_REACH_SLOTS + 1;
 end
 nReSci1 = scen.pscchSymbols * scen.pscchPrb * 12;   % PSCCH REs, from the fields above
 
@@ -334,7 +351,7 @@ if isfield(ov, 'flows') && ~isempty(ov.flows)
 else
     % The one-flow shorthand. Identical in effect to a one-element `flows`, and kept because
     % most scenarios are single-flow and should not have to write a struct array to say so.
-    raw = struct('pqi', ovGet(ov, 'pqi', 55), 'periodMs', ovGet(ov, 'periodMs', 100), ...
+    raw = struct('pqi', ovGet(ov, 'pqi', 58), 'periodMs', ovGet(ov, 'periodMs', 100), ...
         'sizeBytes', ovGet(ov, 'sizeBytes', 300), 'lcid', ovGet(ov, 'lcid', 4), ...
         'pdbMsOverride', ovGet(ov, 'pdbMsOverride', []), 'nPackets', ovGet(ov, 'nPackets', inf));
 end
@@ -343,7 +360,7 @@ t = cfg.pqiTable();
 flows = repmat(flowTemplate(), 1, numel(raw));
 for f = 1:numel(raw)
     r = raw(f);
-    pqi = fGet(r, 'pqi', 55);
+    pqi = fGet(r, 'pqi', 58);
     row = t([t.PQI] == pqi);
     if isempty(row)
         error('sls:scenarioInit:unknownPqi', 'buildFlows: flow %d asks for PQI %d, which is not a row of cfg.pqiTable', f, pqi);
@@ -360,6 +377,13 @@ for f = 1:numel(raw)
     flows(f).periodSlots = periodMs * slotsPerMs;
     flows(f).sizeBytes   = fGet(r, 'sizeBytes', 300);
     flows(f).nPackets    = fGet(r, 'nPackets', inf);
+    % 'periodic' (app.trafficPeriodic, a fixed period with a per-UE phase) or 'poisson'
+    % (app.trafficPoisson, event-driven, periodMs read as the MEAN inter-arrival time). Grant
+    % sizing below reads periodMs either way, so a Poisson flow's grant is sized for its mean rate.
+    flows(f).arrival     = fGet(r, 'arrival', 'periodic');
+    if ~any(strcmp(flows(f).arrival, {'periodic', 'poisson'}))
+        error('sls:scenarioInit:badArrival', 'buildFlows: flow %d arrival must be ''periodic'' or ''poisson'', got ''%s''', f, flows(f).arrival);
+    end
     % sl-PrioritisedBitRate defaults to exactly this flow's own arrival rate, so the first
     % (SBj-limited) pass of clause 5.22.1.4.1.2 can carry the flow's steady-state load and no
     % more. Leaving it at zero makes the buckets inert and hands everything to the second pass;
@@ -378,8 +402,8 @@ end
 end
 
 function f = flowTemplate()
-f = struct('lcid', 4, 'pqi', 55, 'prio', 5, 'pdbMs', 100, 'periodMs', 100, ...
-    'periodSlots', 200, 'sizeBytes', 300, 'nPackets', inf, ...
+f = struct('lcid', 4, 'pqi', 58, 'prio', 4, 'pdbMs', 100, 'periodMs', 100, ...
+    'periodSlots', 200, 'sizeBytes', 300, 'nPackets', inf, 'arrival', 'periodic', ...
     'pbrBytesPerSec', 3000, 'bsdSeconds', 0.1);
 end
 

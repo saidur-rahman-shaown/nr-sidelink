@@ -111,10 +111,12 @@ SL-SyncConfigList-r16 ::= SEQUENCE (SIZE (1..16)) OF INTEGER (0..15)
 SL-CBR-PriorityTxConfigList-r16 ::=
   SEQUENCE (SIZE (1..8)) OF SL-CBR-PriorityTxConfig-r16
 
+-- Corrected 2026-10-28 from TS 38.331 V16.22.0: SL-PriorityTxConfigIndex-r16.
 SL-CBR-PriorityTxConfig-r16 ::= SEQUENCE {
-  sl-Priority-r16  INTEGER (1..8),
-  sl-CBR-r16       SL-CBR-r16,
-  ...
+  sl-PriorityThreshold-r16     INTEGER (1..8) OPTIONAL,
+  sl-DefaultTxConfigIndex-r16  INTEGER (0..15) OPTIONAL,
+  sl-CBR-ConfigIndex-r16       INTEGER (0..7) OPTIONAL,
+  sl-Tx-ConfigIndexList-r16    SEQUENCE (SIZE (1..16)) OF INTEGER (0..63) OPTIONAL
 }
 
 SL-CBR-PriorityTxConfigList-v1650 ::=
@@ -126,13 +128,20 @@ SL-CBR-PriorityTxConfig-v1650 ::= SEQUENCE {
   ...
 }
 
-SL-CBR-CommonTxConfigList-r16 ::=
-  SEQUENCE (SIZE (1..8)) OF SL-CBR-CommonTxConfig-r16
+SL-CBR-CommonTxConfigList-r16 ::= SL-CBR-CommonTxConfig-r16   -- a SEQUENCE, despite its name (TS 38.331)
 
+-- Corrected 2026-10-28 from TS 38.331 V16.22.0 (Documentations/38331-gm0.pdf): the list below is a
+-- SEQUENCE of two lists, and the element type is not {sl-Priority, sl-CBR}.
 SL-CBR-CommonTxConfig-r16 ::= SEQUENCE {
-  sl-Priority-r16  INTEGER (1..8),
-  sl-CBR-r16       SL-CBR-r16,
-  ...
+  sl-CBR-RangeConfigList-r16     SEQUENCE (SIZE (1..8)) OF SL-CBR-LevelsConfig-r16 OPTIONAL,
+  sl-CBR-PSSCH-TxConfigList-r16  SEQUENCE (SIZE (1..64)) OF SL-CBR-PSSCH-TxConfig-r16 OPTIONAL
+}
+
+SL-CBR-LevelsConfig-r16 ::= SEQUENCE (SIZE (1..16)) OF SL-CBR-r16
+
+SL-CBR-PSSCH-TxConfig-r16 ::= SEQUENCE {
+  sl-CR-Limit-r16      INTEGER (0..10000) OPTIONAL,
+  sl-TxParameters-r16  SL-PSSCH-TxParameters-r16 OPTIONAL
 }
 
 SL-CBR-CommonTxDedicatedSL-PRS-RP-List-r18 ::=

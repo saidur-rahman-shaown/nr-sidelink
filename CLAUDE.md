@@ -20,6 +20,9 @@ and back up at the receiver.
 - `.claude/rules/portability.md` — the C/HDL port constraints (documented dynamic ranges,
   verbatim 3GPP field names, numerology never hardcoded).
 - `.claude/rules/vector-discipline.md` — golden-vector rules.
+- `.claude/rules/full-stack-simulation.md` — **every reported result goes application → stack → PHY →
+  30.72 Msps IQ → RF hardware → channel → RF hardware → PHY → stack → application** (`+harness/+deploy/`,
+  `runTwoUe`). No BLER-table / SINR abstraction as a deliverable; if the full stack is too slow, ask first.
 - `+test/CLAUDE.md` — the four verification levels and what each one does and does not prove.
 - The `CLAUDE.md` inside each package — status, module table, known traps, and what is
   deliberately not built. **Read the one for the directory you are about to touch.** They carry
@@ -43,15 +46,22 @@ Directory structure is the protocol stack; inside `+phy/` the split is by specif
     +mac/        38.321 §5.22 TX + §5.22.2 RX, §6.1.6 mux/demux      (B8, built)
     +rf/         RF stage — our boundary, no 3GPP SAP exists         (built, thin)
     +app/        traffic generation                       (periodic; multi-flow via c.app.flows)
-    +rlc/ +pdcp/ +sdap/ +pc5s/   upper layers                        (planned, B9)
+    +rlc/        38.322 UM + AM                                      (B9, built)
+    +pdcp/       38.323 sidelink TX/RX, discard = PDB, reordering    (B9, built)
+    +sdap/       37.324 QoS flow -> SLRB, header (no local PDF)      (B9, built, header unverified)
+    +stack/      one UE's AS: app packet -> SDAP..PHY -> IQ and back,
+                 configured only from the stored JSON                (built; not in +harness/+sls yet)
+    +pc5s/       24.587 PC5-S signalling                             (planned, B9; NAS, not data AS)
     +harness/    +sls/ + +lls/ run; BLER measured, RMa channel       (B10, partial)
+    +experiments/ the report suite: slot structure, latency, throughput,
+                 distance, field, event strategy, CBR, segmentation  (ours; see its CLAUDE.md)
     +vec/ +test/ golden vectors and verification
 
 ## Normative vs ours
 Any package named after a specification, plus `+chan/`, `+mac/`, `+rlc/`, `+pdcp/`, `+sdap/`,
 `+pc5s/`, `+cfg/`, is **normative**: bit-exact against any other compliant implementation, and
 subject to every rule in `.claude/rules/normative-packages.md`. `+phy/+rx/`, `+phy/+lib/`,
-`+harness/`, `+app/` and any `+policy/` package are ours to tune and replace — toolbox calls are
+`+harness/`, `+app/`, `+stack/` and any `+policy/` package are ours to tune and replace — toolbox calls are
 expected there, but their interfaces to normative packages must stay flat, and a change there
 must never force a change on the normative side.
 
@@ -83,11 +93,22 @@ example, or a module lacking a test file.
     matlab -batch "test.runAllTests"     % all packages
     matlab -batch "test.runPhyTests"     % +phy/
     matlab -batch "test.runMacTests"     % +mac/
+    matlab -batch "test.runRlcTests"     % +rlc/
+    matlab -batch "test.runStackTests"   % +pdcp/ +sdap/ +cfg bearers +stack/ (end to end to IQ)
     matlab -batch "test.runSapTests"     % +sap/
     matlab -batch "test.runHarnessTests" % +harness/
 
 ## Running a simulation
+Results are always produced at full stack and waveform level (`.claude/rules/full-stack-simulation.md`):
+
+    matlab -batch "r = runTwoUe();"     % two UEs, one flow, full stack + RF; edit twoUeConfig.m
+    matlab -batch "[r, S] = runDeploy();"   % many moving UEs, full stack + RF; edit deployConfig.m
+
+The abstracted system-level runs below are for debugging and cross-checks only:
     matlab -batch "k = harness.sls.run(50, 4000, 7); disp(k)"   % nUe, physical slots, seed
+    matlab -batch "r = runField();"   % 5 UEs, full stack at waveform level; edit fieldConfig.m. See FIELD.md
+    matlab -batch "experiments.runStudy()" % the three-part study in report/REPORT.md; figures in plots/study/
+    matlab -batch "experiments.runAll()"   % the earlier detailed suite; figures in plots/experiments/
 
 ## Regenerating the BLER table
 `+harness/+phyabs/blerTable.m` is GENERATED — measured by `+harness/+lls/` over the real

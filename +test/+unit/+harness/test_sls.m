@@ -189,8 +189,18 @@ assert(abs(sp0(1, 2) - sd0(1, 2)) < 1e-9, 'with no interference PSCCH and PSSCH 
 % A narrow interferer sitting on the victim's lowest sub-channel: it covers ALL the PSCCH and
 % only part of the PSSCH, so the PSCCH is hurt far more.
 pair = [mk(1, [0 0], 0, 3), mk(2, [250 0], 0, 1)];
-[sd1, ~, ~, sp1] = harness.chanmodel.slotSinr(pair, [0 0; 250 0; 120 0], sc.radio, sc.numSubchannel, sc.pscchPrb, sc.subchSizeRb);
-assert(sp1(1, 3) < sd1(1, 3) - 5, 'a sub-channel-aligned interferer must hurt PSCCH far more than PSSCH, got %.2f vs %.2f dB', sp1(1, 3), sd1(1, 3));
+[sd1, rx1, ~, sp1] = harness.chanmodel.slotSinr(pair, [0 0; 250 0; 120 0], sc.radio, sc.numSubchannel, sc.pscchPrb, sc.subchSizeRb);
+% Independent check from the definitions, not from the code: the interferer puts ALL its power
+% into one sub-channel inside the victim's band, so over the victim's 3-sub-channel band the
+% interference is the interferer's whole received power. This assertion used to read "PSCCH at
+% least 5 dB below PSSCH" while slotSinr scaled interference by the VICTIM's width (P/3); the
+% true gap when interference dominates is 10*log10(L_victim) = 4.77 dB, and the 5 dB threshold
+% had been fitted to the defective 9 dB.
+mw = @(dbm) 10.^(dbm / 10);
+nMw = mw(rf.noiseFloorDbm(sc.radio.bwHz * 3 / sc.numSubchannel, sc.radio.noiseFigureDb));
+expectPssch = 10 * log10(mw(rx1(1, 3)) / (nMw + mw(rx1(2, 3))));
+assert(abs(sd1(1, 3) - expectPssch) < 0.01, 'PSSCH SINR %.3f dB, expected S/(N + P_k) = %.3f dB', sd1(1, 3), expectPssch);
+assert(sp1(1, 3) < sd1(1, 3) - 4, 'a sub-channel-aligned interferer must hurt PSCCH more than PSSCH (gap -> 10log10(3)), got %.2f vs %.2f dB', sp1(1, 3), sd1(1, 3));
 
 % Control robustness comes from CODE RATE, and it is now MEASURED rather than approximated by
 % reading the PSSCH curve at a low proxy MCS. The advantage grows with the data's MCS, because
@@ -354,7 +364,10 @@ for n = [20 50 80]
         worst = max(worst, nnz(ueD(i).harqRx.occupied));
     end
     cap = ueD(1).harqRx.nProcesses;
+    nDrop = sum([ueD.rxNoProcess]);
+    fprintf('receive processes at %d UEs: worst UE holds %d of %d, %d TBs dropped for want of one\n', n, worst, cap, nDrop);
     assert(worst < cap, 'at %d UEs the worst UE holds %d of %d receive processes -- the entity is exhausted and dropping TBs', n, worst, cap);
+    assert(nDrop == 0, 'at %d UEs %d TBs were dropped with every receive process busy (BUG-02)', n, nDrop);
 end
 
 %% ---- runs must cross the DFN wrap ---------------------------------------
@@ -402,7 +415,7 @@ cF.sim.plot  = false;
 cF.sim.nSlots = [];                          % auto: long enough to finish the quota and drain
 cF.policy.prsvpTxMs = 20;
 cF.app.flows = struct( ...
-    'pqi',       {55,  70,  89}, ...         % 100 ms PDB / prio 6, 20 ms / prio 3, 200 ms / prio 3
+    'pqi',       {58,  56,  59}, ...         % TS 23.287 Table 5.4.4-1: 100 ms / prio 4, 20 ms / prio 6, 500 ms / prio 6
     'periodMs',  {100, 100, 100}, ...
     'sizeBytes', {300, 190, 450}, ...
     'lcid',      {4,   5,   6}, ...
@@ -420,7 +433,7 @@ assert(kF.nInFlight == 0, 'the auto run length must be long enough to resolve ev
 % Every packet belongs to exactly one flow, and each flow is scored against ITS OWN PDB.
 assert(numel(kF.byFlow) == 3, 'kpiReport must report one row per flow');
 assert(sum([kF.byFlow.nResolved]) == kF.nResolved, 'the per-flow rows must partition the resolved packets');
-assert(isequal([kF.byFlow.pdbMs], [100 20 200]), 'each flow must carry its own PQI''s PDB, got %s', mat2str([kF.byFlow.pdbMs]));
+assert(isequal([kF.byFlow.pdbMs], [100 20 500]), 'each flow must carry its own PQI''s PDB, got %s', mat2str([kF.byFlow.pdbMs]));
 for f = 1:3
     b = kF.byFlow(f);
     assert(all(b.latencyMs <= b.pdbMs), 'LCID %d: a delivered packet exceeded its own %g ms PDB', b.lcid, b.pdbMs);

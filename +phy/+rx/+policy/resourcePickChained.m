@@ -9,7 +9,8 @@ function [slots, subch, N] = resourcePickChained(candY, candX, survivor, draws, 
 %        survivor      1 x Mtotal logical -- membership of S_A
 %        draws         1 x maxReserve real in [0,1) -- one uniform draw per resource. Inputs,
 %                      never generated here, following +mac/'s rule so a grant replays exactly
-%        maxReserve    integer, 2 or 3 -- sl-MaxNumPerReserve
+%        maxReserve    integer, 1..3 -- resources to reserve: the UE's choice, at most
+%                      sl-MaxNumPerReserve (n2/n3). 1 = no blind retransmission resource
 %        minGapSlots   integer, >=0 -- the minimum separation TS 38.321 clause 5.22.1.1
 %                      requires between any two resources of one selected grant, from
 %                      phy.rx.policy.minResourceGapSlots. 0 when PSFCH is not configured
@@ -35,7 +36,8 @@ function [slots, subch, N] = resourcePickChained(candY, candX, survivor, draws, 
 %notice, because a simulator that never encodes the SCI never discovers the field will not hold
 %the value. The transmissions still happen, the KPI still comes out, and the grant is one no
 %conformant UE could announce. This function draws the anchor freely and every chained resource
-%from the anchor's reachable window only.
+%from the anchor's reachable window only -- after it when possible, otherwise before it, so that
+%an anchor drawn at the end of the window still gets its retransmission resources.
 %
 %N DEGRADES RATHER THAN FAILING
 %-------------------------------
@@ -48,8 +50,8 @@ function [slots, subch, N] = resourcePickChained(candY, candX, survivor, draws, 
 %whatever latency behaviour phy.rx.policy.resourcePick has -- see its note on the uniform draw
 %and +phy/+rx/+policy/CLAUDE.md on T2.
 
-if ~any(maxReserve == [2 3])
-    error('policy:resourcePickChained:badMaxReserve', 'resourcePickChained: maxReserve must be 2 or 3, got %s', num2str(maxReserve));
+if ~any(maxReserve == [1 2 3])
+    error('policy:resourcePickChained:badMaxReserve', 'resourcePickChained: maxReserve must be 1, 2 or 3, got %s', num2str(maxReserve));
 end
 if numel(draws) < maxReserve
     error('policy:resourcePickChained:tooFewDraws', 'resourcePickChained: need %d draws, got %d', maxReserve, numel(draws));
@@ -77,11 +79,27 @@ for r = 2:maxReserve
     % other, while the minimum gap is between CONSECUTIVE resources.
     reachable = survivor & (candY >= slots(end) + max(1, minGapSlots)) & (candY <= anchorSlot + gapMax);
     if ~any(reachable)
+        % Nothing after the anchor: it was drawn near the end of the window. Look BEFORE it too.
+        % Clause 5.22.1.1 does not make the first draw the initial transmission; what binds is
+        % that every resource of the TB lies within TRIV's reach of the EARLIEST one, which then
+        % carries the SCI. So any survivor keeping the whole set within gapMax of its earliest
+        % member, and the minimum gap from every chosen resource, will do. Without this an anchor
+        % in the last slots left the grant with one resource -- harmless for one packet, but an
+        % SPS grant repeats it for its whole life: measured, 14 periods in a row with no
+        % retransmission in the full-stack two-UE run (2026-10-28).
+        gap = max(1, minGapSlots);
+        far = abs(candY(:) - slots(:)') < gap;                % too close to a chosen resource
+        reachable = survivor & ~any(far, 2)' & (candY >= max(slots) - gapMax) & (candY <= min(slots) + gapMax);
+    end
+    if ~any(reachable)
         break;                       % nothing in reach: reserve fewer resources, do not fail
     end
     [s, x] = phy.rx.policy.resourcePick(candY, candX, reachable, draws(r));
     slots(end + 1) = s;  %#ok<AGROW>
     subch(end + 1) = x;  %#ok<AGROW>
     N = N + 1;
+    anchorSlot = min(slots);         % the earliest resource is the one that carries the SCI
 end
+[slots, o] = sort(slots);
+subch = subch(o);
 end

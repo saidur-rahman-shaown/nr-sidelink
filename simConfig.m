@@ -57,8 +57,10 @@ c.pool.crLimitByLevel      = [1.0 0.6 0.3 0.12 0.05]; % sl-CR-Limit per CBR leve
 % TS 38.321 clause 5.22.1.4.1's logical channel prioritisation exists for. Add or remove rows
 % freely; the only rule is that each needs its own LCID.
 %
-%   pqi        PC5 5QI. Priority and PDB come from +cfg/pqiTable -- see it for the rows.
-%              55 = 100 ms PDB / prio 6, 70 = 20 ms / prio 3, 89 = 200 ms / prio 3.
+%   pqi        PQI. Priority, PDB and PER come from +cfg/pqiTable (TS 23.287 Table 5.4.4-1).
+%              Broadcast may use only 55..59 (NOTE 1): 55 = 10 ms / prio 3, 56 = 20 ms / prio 6,
+%              57 = 25 ms / prio 5, 58 = 100 ms / prio 4, 59 = 500 ms / prio 6. Unicast may also
+%              use the GBR rows 21, 22, 23 and the delay-critical 90, 91.
 %   periodMs   generation period. Must be a whole number of slots at c.pool.mu.
 %   sizeBytes  SDU payload size.
 %   lcid       logical channel ID. Table 6.2.4-1: 4..19 is STCH. Must be distinct per flow.
@@ -66,12 +68,18 @@ c.pool.crLimitByLevel      = [1.0 0.6 0.3 0.12 0.05]; % sl-CR-Limit per CBR leve
 %              simulation. A finite count is what makes c.sim.nSlots = [] work: the run
 %              lengthens itself to generate them all and then drain.
 %   pdbMsOverride  [] uses the PQI's own PDB; a number overrides it.
-c.app.flows(1) = struct('pqi', 55, 'periodMs', 100, 'sizeBytes', 300, 'lcid', 4, ...
-                        'nPackets', 600, 'pdbMsOverride', []);
-c.app.flows(2) = struct('pqi', 70, 'periodMs', 100, 'sizeBytes', 190, 'lcid', 5, ...
-                        'nPackets', 600, 'pdbMsOverride', []);
-c.app.flows(3) = struct('pqi', 89, 'periodMs', 100, 'sizeBytes', 450, 'lcid', 6, ...
-                        'nPackets', 600, 'pdbMsOverride', []);
+% The FIRST row is flows(1); every further row is flows(end+1), so rows can be commented out
+% from the bottom without renumbering. Never leave a gap: assigning flows(2) while flows(1) is
+% commented out auto-creates an empty element 1, which scenarioInit fills with its defaults --
+% an unbounded (nPackets = inf) flow you never asked for, which auto nSlots then refuses.
+%   arrival    'periodic' (one packet every periodMs, each UE at its own phase) or 'poisson'
+%              (event traffic: periodMs is the MEAN gap between events). Default 'periodic'.
+c.app.flows(1)     = struct('pqi', 56, 'periodMs', 200, 'sizeBytes', 300, 'lcid', 5, ...
+                        'nPackets', 1000, 'pdbMsOverride', [], 'arrival', 'periodic');
+% c.app.flows(end+1) = struct('pqi', 58, 'periodMs', 100, 'sizeBytes', 300, 'lcid', 4, ...
+%                         'nPackets', 1000, 'pdbMsOverride', [], 'arrival', 'periodic');
+% c.app.flows(end+1) = struct('pqi', 55, 'periodMs', 500, 'sizeBytes', 200, 'lcid', 6, ...
+%                         'nPackets', 1000, 'pdbMsOverride', [], 'arrival', 'poisson');
 
 % =====================================================================================
 % SELECTION POLICY: the part the spec leaves to UE implementation
@@ -83,8 +91,9 @@ c.app.flows(3) = struct('pqi', 89, 'periodMs', 100, 'sizeBytes', 450, 'lcid', 6,
 % T2 is the remaining PDB LESS the decoding allowance below. The PDB is a deadline for
 % DELIVERY, so a packet transmitted exactly at the deadline is late by however long the
 % receiver takes to decode it.
-c.policy.decodeMarginSlots = 2;    % slots reserved for the receiver to decode.
-                                   %   T2 = remaining PDB - this
+c.policy.decodeMarginSlots = 2;    % slots reserved for the receiver to decode AFTER the
+                                   %   transmission slot: the last slot a TB may start in is
+                                   %   n + remaining PDB - this - 1 (phy.rx.policy.pdbLogicalSlots)
 c.policy.mcs               = 7;    % I_MCS (QPSK at 7 in every selectable table)
 % P_rsvp_TX, the reservation period. THE MOST CONSEQUENTIAL KNOB HERE when there are several
 % flows: one periodic grant offers one transport block per period, so the pool of capacity a UE
@@ -92,7 +101,15 @@ c.policy.mcs               = 7;    % I_MCS (QPSK at 7 in every selectable table)
 % tight flows expire waiting for an opportunity, however good the radio link is -- runSim
 % prints offered load against grant capacity every run so this is visible rather than inferred.
 c.policy.prsvpTxMs         = 50;    % three 100 ms flows offer 9.4 kB/s; 100 ms would cap at 8.3
-c.policy.numRetx           = 1;    % blind retransmissions beyond the initial transmission
+c.policy.numRetx           = 1;    % blind retransmissions beyond the initial transmission: the
+                                   %   grant reserves numRetx+1 resources per period, at most
+                                   %   c.pool.maxNumPerReserve (n2/n3; raise it to 3 for 2 retx)
+c.policy.prepSlots         = 0;    % slots an SDU waits before any TB may carry it (phy.rx.policy.
+                                   %   defaults); T_proc,1 = 5 makes T1 the floor on every first TX
+c.policy.t2MaxMs           = Inf;  % cap on the selection-window end T2 (never below T2min).
+                                   %   Inf = T2 at the remaining PDB. For periodic traffic, a cap
+                                   %   at prsvpTxMs stops the first resource landing more than one
+                                   %   period out, which leaves a standing one-packet backlog
 
 % =====================================================================================
 % RADIO

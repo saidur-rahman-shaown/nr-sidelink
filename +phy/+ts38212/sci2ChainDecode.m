@@ -22,7 +22,7 @@ K = A + 24;
 N = phy.lib.ts38212.polarMotherLength(K, G, 9);
 
 recovered = phy.lib.ts38212.polarDeRateMatch(llr(:), K, N, true);
-withCrc   = phy.lib.ts38212.polarDecode(recovered, K, N, listSize, 9, true, 24);
+withCrc   = phy.lib.ts38212.polarDecode(recovered, K, G, listSize, 9, true, 24);
 [sci2Bits, err] = phy.lib.ts38212.dciCrcCheck(withCrc, []);
 crcOk = (err == 0);
 end

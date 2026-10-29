@@ -1,0 +1,3 @@
+flow,pdbMs,pairs,onTime,late,lost,onTimeShare,lostNotSent,lostHalfDuplex,lostCollision,lostRadio,p50Ms,p95Ms,verdict
+cam,100,12598,10762,170,1666,0.854262581362121,0,5,1563,98,48.5,97,FAIL
+evt,20,2229,1401,468,360,0.628532974427995,0,4,334,22,15,28,FAIL

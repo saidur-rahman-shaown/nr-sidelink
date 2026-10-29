@@ -18,10 +18,17 @@ if any(dMetres(:) < 0)
     error('chanmodel:pathloss:negativeDistance', 'pathloss: distance cannot be negative');
 end
 
+C_LIGHT = 299792458;
+D_MIN_M = 1;                                  % keep log10 finite for co-located UEs
 switch model.name
     case 'rma'
         pl = harness.chanmodel.pathlossRma(dMetres, model.fcHz, model.losMode, model.hTxM, model.hRxM);
+    case 'freespace'
+        pl = 20 * log10(4 * pi * max(dMetres, D_MIN_M) * model.fcHz / C_LIGHT);
     otherwise
         error('chanmodel:pathloss:unknownModel', 'pathloss: no implementation for ''%s''', model.name);
+end
+if isfield(model, 'antennaGainDb')
+    pl = pl - model.antennaGainDb;            % coupling loss: the antennas' gain comes off
 end
 end

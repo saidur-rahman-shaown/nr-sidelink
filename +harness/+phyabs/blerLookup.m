@@ -35,7 +35,6 @@ function bler = blerLookup(mcs, sinrDb, txAttempt, channelModel, speedKmh)
 %silently answered with the AWGN curve. A fading table is the next measurement, not a
 %reinterpretation of this one.
 
-tbl = harness.phyabs.blerTable();
 
 if ~(mcs >= 0 && mcs <= 31 && mod(mcs, 1) == 0)
     error('phyabs:blerLookup:badMcs', 'blerLookup: mcs must be an integer in 0..31, got %s', num2str(mcs));
@@ -52,12 +51,9 @@ end
 % A key the table was not measured under is an error, never a substitution. Answering an
 % unknown key with the nearest measured one is exactly the silent extrapolation this whole
 % module is written to avoid.
-if ~strcmp(channelModel, tbl.meta.channelModel)
-    error('phyabs:blerLookup:unknownModel', 'blerLookup: the table was measured over ''%s'', not ''%s'' -- measure a new table rather than reading this one off-key', tbl.meta.channelModel, channelModel);
-end
-if speedKmh ~= tbl.meta.speedKmh
-    error('phyabs:blerLookup:unknownSpeed', 'blerLookup: the table was measured at %g km/h, not %g', tbl.meta.speedKmh, speedKmh);
-end
+% The table for exactly this key: the shipped one, or a measured one from the registry. An
+% unmeasured key raises there (phyabs:blerLookup:unknownModel / :unknownSpeed).
+tbl = harness.phyabs.blerTableFor(channelModel, speedKmh);
 
 bler = harness.phyabs.blerInterp(tbl, 'pssch', mcs, sinrDb, txAttempt);
 end

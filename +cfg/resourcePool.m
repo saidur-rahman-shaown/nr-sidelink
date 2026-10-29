@@ -249,20 +249,34 @@ end
 
 function c = buildUeSelectedConfigRp(raw)
 % SPEC: TS 38.331, SL-UE-SelectedConfigRP-r16
+% SL-CBR-PriorityTxConfigList-r16 (TS 38.331 V16.22.0): SIZE(1..8) OF SL-PriorityTxConfigIndex-r16 --
+%   sl-PriorityThreshold-r16     (1..8)  upper bound of the priority range, ascending over entries
+%   sl-DefaultTxConfigIndex-r16  (0..15) entry of sl-Tx-ConfigIndexList used with no CBR measurement
+%   sl-CBR-ConfigIndex-r16       (0..7)  entry of sl-CBR-RangeConfigList giving the CBR ranges
+%   sl-Tx-ConfigIndexList-r16    SIZE(1..16) OF (0..63), one per CBR range: entry of
+%                                sl-CBR-PSSCH-TxConfigList (CR limit, transmission parameters)
+% It parsed a made-up {sl-Priority, sl-CBR} pair until 2026-10-28.
+MAX_PRIO_ENTRIES = 8; MAX_CBR_LEVEL = 16;
 cbrItems = getOptList(raw, 'sl_CBR_PriorityTxConfigList_r16');
 c.sl_CBR_PriorityTxConfigList_r16_Present = ~isempty(cbrItems);
-if c.sl_CBR_PriorityTxConfigList_r16_Present
-    if numel(cbrItems) < 1 || numel(cbrItems) > 8
-        error('cfg:resourcePool:badSize', 'sl-CBR-PriorityTxConfigList-r16: SIZE(1..8), got %d entries', numel(cbrItems));
+if numel(cbrItems) > MAX_PRIO_ENTRIES
+    error('cfg:resourcePool:badSize', 'sl-CBR-PriorityTxConfigList-r16: SIZE(1..%d), got %d entries', MAX_PRIO_ENTRIES, numel(cbrItems));
+end
+c.sl_CBR_PriorityTxConfigList_r16 = repmat(struct('sl_PriorityThreshold_r16_Present', false, 'sl_PriorityThreshold_r16', 0, ...
+    'sl_DefaultTxConfigIndex_r16_Present', false, 'sl_DefaultTxConfigIndex_r16', 0, ...
+    'sl_CBR_ConfigIndex_r16_Present', false, 'sl_CBR_ConfigIndex_r16', 0, ...
+    'sl_Tx_ConfigIndexList_r16_Present', false, 'sl_Tx_ConfigIndexList_r16', zeros(1, 0)), 1, 0);
+for i = 1:numel(cbrItems)
+    it = cbrItems{i}; e = struct();
+    [e.sl_PriorityThreshold_r16, e.sl_PriorityThreshold_r16_Present] = getOptional(it, 'sl_PriorityThreshold_r16', 0);
+    [e.sl_DefaultTxConfigIndex_r16, e.sl_DefaultTxConfigIndex_r16_Present] = getOptional(it, 'sl_DefaultTxConfigIndex_r16', 0);
+    [e.sl_CBR_ConfigIndex_r16, e.sl_CBR_ConfigIndex_r16_Present] = getOptional(it, 'sl_CBR_ConfigIndex_r16', 0);
+    [lst, e.sl_Tx_ConfigIndexList_r16_Present] = getOptional(it, 'sl_Tx_ConfigIndexList_r16', zeros(1, 0));
+    e.sl_Tx_ConfigIndexList_r16 = double(lst(:)');
+    if numel(e.sl_Tx_ConfigIndexList_r16) > MAX_CBR_LEVEL
+        error('cfg:resourcePool:badSize', 'sl-Tx-ConfigIndexList-r16: SIZE(1..%d), got %d', MAX_CBR_LEVEL, numel(e.sl_Tx_ConfigIndexList_r16));
     end
-    cb = repmat(struct('sl_Priority_r16', 0, 'sl_CBR_r16', 0), 1, numel(cbrItems));
-    for i = 1:numel(cbrItems)
-        cb(i).sl_Priority_r16 = getMandatory(cbrItems{i}, 'sl_Priority_r16');   % INTEGER (1..8)
-        cb(i).sl_CBR_r16      = getMandatory(cbrItems{i}, 'sl_CBR_r16');        % INTEGER (0..100)
-    end
-    c.sl_CBR_PriorityTxConfigList_r16 = cb;
-else
-    c.sl_CBR_PriorityTxConfigList_r16 = repmat(struct('sl_Priority_r16', 0, 'sl_CBR_r16', 0), 1, 0);
+    c.sl_CBR_PriorityTxConfigList_r16(i) = e;
 end
 
 [c.sl_Thres_RSRP_List_r16, c.sl_Thres_RSRP_List_r16_Present] = getOptional(raw, 'sl_Thres_RSRP_List_r16', zeros(1, 64));   % SIZE(64), INTEGER(0..66)

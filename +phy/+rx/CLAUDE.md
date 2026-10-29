@@ -43,7 +43,7 @@ empty.
 | Module | What it does |
 |---|---|
 | `+ce/gridExtract` | pull a channel's data and DM-RS REs out of a received grid, in mapping order |
-| `+ce/dmrsEstimate` | least-squares channel estimate at the pilots, interpolated to the data REs, plus a noise-variance estimate from the pilot residual |
+| `+ce/dmrsEstimate` | least-squares channel estimate at the pilots, interpolated to the data REs, plus a noise-variance estimate from the pilot residual: one scalar, or per block of `groupSc` subcarriers (`+stack/` uses one sub-channel) so a partial collision becomes erasures, not confident errors that HARQ combining would carry forward. `+lls/` keeps the scalar, because the BLER table is defined by it |
 | `+eq/zfEqualise` | zero forcing, returning **per-RE** post-equalisation noise variance |
 
 ### The receiver is not given the channel or the noise

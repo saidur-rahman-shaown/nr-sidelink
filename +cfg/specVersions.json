@@ -1,5 +1,5 @@
 {
-  "_comment": "Frozen per +cfg/CLAUDE.md: 'written once, changed only by explicit decision'. TS38211/212/213/214/215/321/323/331 are read verbatim from the title page of the matching PDF in Documentations/ (see Documentations/Notes/00-INDEX.md). TS38322/37324/24587/23287/37885 have no local PDF and stay as unverified placeholders -- do not treat those five as authoritative (this is exactly why +cfg/pqiTable.m's TS23287 rows are recalled, not extracted). TS38215 moved off that placeholder list when +phy/+ts38215/ was built: a local PDF ('Documentations/38215-g70 2.pdf') now exists and its title page reads V16.7.0 (2023-12), so the recalled placeholder V16.6.0 was corrected to V16.7.0. Not cosmetic -- V16.7.0's change history carries two Rel-16 CRs against the sidelink measurement clauses that package implements ('Corrections to Applicable RRC States for Sidelink Measurements' and 'CR on applicability of sidelink measurements'). This is the explicit decision +cfg/CLAUDE.md requires for changing this file.",
+  "_comment": "Frozen per +cfg/CLAUDE.md: 'written once, changed only by explicit decision'. TS38211/212/213/214/215/321/322/323/331 are read verbatim from the title page of the matching PDF in Documentations/ (see Documentations/Notes/00-INDEX.md). TS24587/37885 have no local PDF and stay as unverified placeholders -- do not treat those two as authoritative. TS38215 moved off that placeholder list when +phy/+ts38215/ was built: a local PDF ('Documentations/38215-g70 2.pdf') now exists and its title page reads V16.7.0 (2023-12), so the recalled placeholder V16.6.0 was corrected to V16.7.0. Not cosmetic -- V16.7.0's change history carries two Rel-16 CRs against the sidelink measurement clauses that package implements ('Corrections to Applicable RRC States for Sidelink Measurements' and 'CR on applicability of sidelink measurements'). This is the explicit decision +cfg/CLAUDE.md requires for changing this file. TS38322 moved off the placeholder list the same way when +rlc/ was built (2026-09-30): Documentations/38322-g30.pdf title page reads V16.3.0 (2022-06), whose last CR (RP-221712, 'Corrections on the receiving RLC entity establishment for SL-SRB0/SL-SRB1') is a sidelink one; the recalled placeholder V16.6.0 was replaced by it. TS37324 moved off the placeholder list on 2026-10-18: Documentations/'37324-j00 2.pdf' reads V19.0.0 (2025-09). It is Release 19, not 16, but its change history shows the sidelink content last changed in V16.3.0 (RP-211470, PQFI terminology); 17.0.0 added NR MBS (Uu only) and 18.0.0/19.0.0 are 'no technical change', so it is used as the Rel-16 sidelink SDAP text. TS23287 moved off the placeholder list on 2026-10-26: Documentations/'23287-j00 copy.pdf' reads V19.0.0 (2025-09). +cfg/pqiTable.m was re-transcribed from its Table 5.4.4-1 (ten rows: 21-23 GBR, 55-59 Non-GBR, 90-91 DC-GBR); the earlier recalled table was wrong, including PQI 55, and held thirteen rows that do not exist.",
   "TS38331": "V16.22.0",
   "TS38211": "V16.10.0",
   "TS38212": "V16.15.0",
@@ -7,11 +7,11 @@
   "TS38214": "V16.17.0",
   "TS38215": "V16.7.0",
   "TS38321": "V16.22.0",
-  "TS38322": "V16.6.0",
+  "TS38322": "V16.3.0",
   "TS38323": "V16.8.0",
-  "TS37324": "V16.6.0",
+  "TS37324": "V19.0.0",
   "TS24587": "V16.6.0",
-  "TS23287": "V16.6.0",
+  "TS23287": "V19.0.0",
   "TS37885": "V16.0.0",
   "asn1Release": "Release 16 baseline (plain -r16 fields only; Rel-17/18 extension groups excluded by scope decision, see +cfg/CLAUDE.md)"
 }

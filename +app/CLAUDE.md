@@ -7,6 +7,11 @@ Not a 3GPP layer and not normative, but it drives everything the KPIs measure, s
 parameters need the same discipline as configuration: taken from config, seeded explicitly,
 documented range.
 
+## Built
+- `trafficPeriodic` — fixed period, per-UE phase (stateless).
+- `trafficPoisson` — event-driven, Poisson arrivals with a given mean inter-arrival; the uniform
+  draw is an input from the scenario's single stream, so it is stateless and reproducible too.
+
 ## Rules
 - Every generator takes an explicit seed. No implicit shuffling. A KPI run that cannot be
   reproduced exactly is not a result.

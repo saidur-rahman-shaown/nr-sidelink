@@ -1,4 +1,4 @@
-function lc = linkConfig(mcs, LsubCH, scen)
+function lc = linkConfig(mcs, LsubCH, scen, nDmrs)
 %linkConfig Everything one link-level slot needs, derived from an MCS and an allocation.
 %Spec:   none itself; every quantity is resolved through the package that owns it --
 %        phy.ts38214.mcsTableSelect, phy.ts38214.tbsDetermine, phy.ts38212.sci2OutputLength.
@@ -8,6 +8,12 @@ function lc = linkConfig(mcs, LsubCH, scen)
 %                from there rather than re-declared so the link-level and system-level paths
 %                cannot drift apart on sub-channel size, symbol count or DM-RS pattern -- which
 %                is the whole point of measuring curves in one and consuming them in the other
+%        nDmrs   optional integer, 2..4 -- PSSCH DM-RS symbols (the sl-PSSCH-DMRS-TimePatternList
+%                entry). Omitted: the 2-symbol pattern [3 10] every shipped table was measured
+%                with. Given: phy.ts38211.slPSSCHDMRSTimePattern(l_d, PSCCH symbols, nDmrs), which
+%                returns [3 10] for 2. The 3- and 4-symbol patterns put a DM-RS in a PSCCH symbol
+%                (l = 1); its interaction with the PSCCH REs is not modelled here, so treat those
+%                curves as a data-channel what-if (experiments.linkCurves uses them so)
 %Outputs: lc  scalar struct with the carrier/config/mapping structs and sizes the chains need
 %
 %The link-level and system-level paths MUST agree on this configuration or the BLER table
@@ -39,8 +45,12 @@ lc.pscchRE = [phy.ts38211.slPSCCHIndices(lc.carrier, lc.pscchCfg); ...
 lc.sci1aBitLen = 32;                        % A for SCI-1A at this pool's field widths
 
 % ---- PSSCH ---------------------------------------------------------------
-lc.dmrsSymbols = [3 10];                    % one Table 8.4.1.1.2-1 pattern
 lc.ld          = scen.slLengthSymbols;
+if nargin < 4
+    lc.dmrsSymbols = [3 10];                % one Table 8.4.1.1.2-1 pattern
+else
+    lc.dmrsSymbols = phy.ts38211.slPSSCHDMRSTimePattern(lc.ld, scen.pscchSymbols, nDmrs);
+end
 lc.sci2BitLen  = 35;                        % SCI format 2-A, clause 8.4.1.1
 
 % G^SCI2 from clause 8.4.4. The RE count it needs is the PSSCH region's own size, so it is

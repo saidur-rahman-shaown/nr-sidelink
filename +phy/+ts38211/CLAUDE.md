@@ -61,7 +61,8 @@ code.
 | `slPSBCHDMRS` / `slPSBCHDMRSIndices` | §8.4.1.4 (sequence); mapping is in §8.4.3 with the rest of the S-SS/PSBCH block | |
 | `slCSIRS` / `slCSIRSIndices` | §8.4.1.5 | not in the original module list — sidelink does have CSI-RS; found during the clause-8 extraction |
 | `slSSBlock` | §8.4.3 | the S-SS/PSBCH block time-frequency structure (Table 8.4.3.1-1) — where S-PSS/S-SSS/PSBCH/PSBCH-DMRS actually land together in one slot |
-| `slAgcSymbol` | §8.2.1 | first symbol of PSSCH/PSCCH and of PSFCH each duplicate the symbol immediately after them |
+| `slAgcSymbol` | §8.2.1, 8.3.1.5, 8.3.2.3 | **built** (for `+stack/`): copies the first mapped symbol into the one before it, on the allocation's subcarriers only |
+| `slPSSCHDMRSTimePattern` | §8.4.1.1.2 Table 8.4.1.1.2-1 | **built**: l-bar for (l_d, PSCCH duration, DM-RS count); the table's holes raise |
 | `slGuardSymbol` | §8.2.1 | exactly one guard symbol, positioned **after** the last symbol of PSSCH/PSFCH/S-SSB — there is no guard symbol *before* PSFCH (see Known traps) |
 
 ### Channels

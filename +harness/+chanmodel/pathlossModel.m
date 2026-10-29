@@ -44,6 +44,13 @@ end
 
 model.name = name;
 model.fcHz = p.fcHz;
+% Combined TX + RX antenna gain, dBi. pathloss() returns the COUPLING loss (path loss minus this),
+% so every caller -- SINR, sensing RSRP, CBR, PSFCH -- sees the antennas without a change of its
+% own. Default 0: an isotropic pair, which is what every result before this field meant.
+model.antennaGainDb = 0;
+if isfield(p, 'antennaGainDb') && ~isempty(p.antennaGainDb)
+    model.antennaGainDb = p.antennaGainDb;
+end
 
 switch name
     case 'rma'
@@ -63,7 +70,11 @@ switch name
         model.hTxM    = p.hTxM;
         model.hRxM    = p.hRxM;
 
+    case 'freespace'
+        % Friis free-space loss, 20*log10(4*pi*d*fc/c): exact physics for an unobstructed
+        % line-of-sight path, which is what an open agricultural field is. Not a recalled 3GPP
+        % fit, so it needs no source PDF.
     otherwise
-        error('chanmodel:pathlossModel:unknownModel', 'pathlossModel: no model named ''%s''; the only model is ''rma''. The log-distance placeholder was removed deliberately -- see this function''s header', name);
+        error('chanmodel:pathlossModel:unknownModel', 'pathlossModel: no model named ''%s''; models are ''rma'' and ''freespace''. The log-distance placeholder was removed deliberately -- see this function''s header', name);
 end
 end

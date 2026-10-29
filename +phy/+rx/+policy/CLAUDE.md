@@ -17,6 +17,7 @@ into `phy.ts38214.candidateSet` and letting *it* re-derive the bounds.
 | `selectionWindow` | T1, T2 | **T1 = T_proc,1^SL, T2 = the remaining PDB** |
 | `selectionRequest` | assembles `candidateSet`'s `req` | derives L_subCH; computes nothing normative |
 | `resourcePick` | which resource out of S_A | uniform |
+| `defaults.prepSlots` | how long an SDU waits before any TB may carry it | 0 (the study sets T_proc,1, so T1 floors every first transmission) |
 
 ## This package is the MAC scheduler
 There is no scheduler in the Uu sense anywhere in this tree, because in Mode 2 the UE
@@ -91,8 +92,13 @@ A delay budget is **wall clock**; clause 8.1.4's T1, T2 and n are **logical pool
     [req, feasible]    = selectionRequest(n, mu, remLogical, ...)
 
 On the baseline pool (`harness.poolAllSlots`, every slot a sidelink slot) the middle step is
-the identity, so skipping it is correct **there and nowhere else**. On a pool holding half the
-slots, a 200-physical-slot budget buys 100 opportunities, and passing the physical figure
+`remPhys - 1`, never more. The budget counts the current slot and the packet is discarded in
+slot `now + remPhys`, so the last usable slot is one before it. The conversion first counted
+the expiry slot as usable, so T2 could select a slot where `sap.lchExpire` had already dropped
+the packet. With a 10 ms PDB, 17 of 239 hazard events in the Part C field were selected and
+never sent; `test_policy` now pins that boundary against `remainingPdbSlots`.
+
+On a pool holding half the slots, a 200-physical-slot budget buys 100 opportunities, and passing the physical figure
 straight through claims twice the time the packet actually has — over-stating T2, under-counting
 deadline misses. The first version of this package did exactly that; the half-pool case in
 `test_policy` is what discriminates the fix.

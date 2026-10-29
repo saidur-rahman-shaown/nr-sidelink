@@ -1,5 +1,5 @@
 function figs = plotKpi(kpi, scen, c)
-%plotKpi Latency CDF and throughput, the two figures the KPI struct cannot show.
+%plotKpi Latency CDF, throughput and per-packet latency -- the figures the KPI struct cannot show.
 %Inputs: kpi   from harness.kpiReport
 %        scen  the resolved scenario
 %        c     the config, for .sim.plotDir
@@ -20,7 +20,7 @@ function figs = plotKpi(kpi, scen, c)
 %wrong for both. So every flow gets its own curve and its own dashed deadline in its own
 %colour; the aggregate is drawn only when there is exactly one flow, where the two coincide.
 
-figs = gobjects(1, 2);
+figs = gobjects(1, 3);
 nFlow = numel(kpi.byFlow);
 co = lines(max(nFlow, 3));
 
@@ -85,10 +85,54 @@ grid on;
 title(sprintf('%d generated, %d in flight  |  link PRR %.3f', ...
     kpi.nGenerated, kpi.nInFlight, kpi.prrLink));
 
+% ---- 3. per-packet latency against WHEN the packet was generated -----------
+% The CDF says how the flow behaved; it cannot say when. Every packet is one point on its
+% flow's line, in generation order, so a run's time structure is visible: a grant whose phase
+% happens to sit late in the budget shows as a plateau, a reselection as a step, and a stretch
+% of expiries as a gap in the line with its packets marked on the deadline. Five expiries
+% scattered through a run and five consecutive are the same number in the KPI table and
+% completely different faults, and this is the figure that separates them.
+figs(3) = figure('Name', 'Per-packet latency', 'Position', [180 180 980 480]);
+hold on; grid on;
+h = gobjects(1, 0);
+lbl = {};
+codes = sap.outcomeCodes();
+for f = 1:nFlow
+    b = kpi.byFlow(f);
+    if isempty(b.pktTGenMs)
+        continue;
+    end
+    tSec = b.pktTGenMs / 1000;
+    % NaN at every packet that was never delivered, so the line BREAKS there rather than
+    % interpolating across the gap. A line drawn straight through a stretch of losses reads as
+    % normal service, which is the one thing that stretch was not.
+    h(end + 1) = plot(tSec, b.pktLatencyMs, '-', 'LineWidth', 1.0, 'Color', co(f, :)); %#ok<AGROW>
+    lbl{end + 1} = sprintf('LCID %d (PQI %d): %d delivered', b.lcid, b.pqi, b.nDelivered); %#ok<AGROW>
+    % Lost packets have no latency, so they are drawn ON their own deadline -- the latency they
+    % would have had to beat and did not. Plotting them at zero, or omitting them, are the two
+    % ways to make a loss look like a success.
+    lost = b.pktOutcome ~= codes.delivered;
+    if any(lost)
+        plot(tSec(lost), repmat(b.pdbMs, 1, nnz(lost)), 'x', 'Color', co(f, :), ...
+            'MarkerSize', 9, 'LineWidth', 1.4, 'HandleVisibility', 'off');
+    end
+    yline(b.pdbMs, '--', sprintf('PDB %g ms (LCID %d)', b.pdbMs, b.lcid), 'Color', co(f, :), ...
+        'LineWidth', 1.2, 'LabelHorizontalAlignment', 'left', 'HandleVisibility', 'off');
+end
+xlabel('packet generation time (s)');
+ylabel('end-to-end latency (ms);  x on the PDB line = never delivered');
+if ~isempty(h)
+    legend(h, lbl, 'Location', 'best', 'Interpreter', 'none');
+end
+title(sprintf('Per-packet latency  |  %s, %d UE, %.0f m, %s  |  %d expired, %d max-retx', ...
+    scen.castLabel, scen.nUe, scen.spacingM, upper(scen.channelModel), ...
+    kpi.nExpired, kpi.nMaxTx));
+
 if ~isempty(c.sim.plotDir)
     if ~exist(c.sim.plotDir, 'dir'), mkdir(c.sim.plotDir); end
     exportgraphics(figs(1), fullfile(c.sim.plotDir, 'latency.png'), 'Resolution', 150);
     exportgraphics(figs(2), fullfile(c.sim.plotDir, 'throughput.png'), 'Resolution', 150);
+    exportgraphics(figs(3), fullfile(c.sim.plotDir, 'latencyPerPacket.png'), 'Resolution', 150);
     fprintf('  figures written to %s\n', c.sim.plotDir);
 end
 end

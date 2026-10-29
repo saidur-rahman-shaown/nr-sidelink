@@ -1,9 +1,11 @@
-function [kpi, ue, scen] = runSim(c)
+function [kpi, ue, scen, resolved] = runSim(c)
 %runSim Run the scenario in simConfig and plot latency and throughput.
 %Inputs: c  optional -- a config struct. Omit it to use simConfig()
 %Outputs: kpi   the KPI struct from harness.kpiReport, including kpi.byFlow
 %         ue    final per-UE state, for inspection
 %         scen  the resolved scenario, including every DERIVED quantity
+%         resolved  every terminal packet context, for asking why one packet went the way it
+%                   did rather than how many did
 %
 %   k = runSim();                       % edit simConfig.m, then run this
 %   c = simConfig(); c.link.spacingM = 400; k = runSim(c);    % or override inline
@@ -23,7 +25,7 @@ if isempty(nSlots)
     nSlots = autoLength(scen);
 end
 
-[kpi, ue] = harness.sls.runScenario(scen, nSlots);
+[kpi, ue, scen, resolved] = harness.sls.runScenario(scen, nSlots);
 
 % ---- report ---------------------------------------------------------------
 msPerSlot = 1 / 2^scen.mu;
@@ -88,12 +90,20 @@ if any(~isfinite([scen.flows.nPackets]))
         'indefinitely (nPackets = inf). Give every flow a finite nPackets, or set c.sim.nSlots.'], ...
         mat2str(find(~isfinite([scen.flows.nPackets]))));
 end
-nTxUe   = max(1, nnz(scen.txUeMask));
+if any(strcmp({scen.flows.arrival}, 'poisson'))
+    error('runSim:poissonAuto', ['runSim: c.sim.nSlots is [] (auto), but flow(s) %s are Poisson -- ', ...
+        'their last arrival is random, so no length can be derived. Set c.sim.nSlots.'], ...
+        mat2str(find(strcmp({scen.flows.arrival}, 'poisson'))));
+end
+% The transmitters' ACTUAL UE IDs: the offset depends on the ID, so 1:nnz(mask) is wrong for any
+% selection that is not the first k UEs (UE 70 alone has offset 69, not 0).
+txIds   = find(scen.txUeMask);
+if isempty(txIds), txIds = 1; end
 lastGen = 0;
 for f = 1:numel(scen.flows)
     fl = scen.flows(f);
-    % The last UE's phase offset, from harness.sls.ueInit's flowOffsets stagger.
-    maxOffset = max(arrayfun(@(u) mod((u - 1) * numel(scen.flows) + (f - 1), fl.periodSlots), 1:nTxUe));
+    % The latest phase offset among the transmitters, harness.sls.ueInit's flowOffsets stagger.
+    maxOffset = max(arrayfun(@(u) mod((u - 1) * numel(scen.flows) + (f - 1), fl.periodSlots), txIds));
     lastGen = max(lastGen, maxOffset + (fl.nPackets - 1) * fl.periodSlots);
 end
 drainSlots = max([scen.flows.pdbMs]) * scen.slotsPerMs + scen.decodeMarginSlots + 20;

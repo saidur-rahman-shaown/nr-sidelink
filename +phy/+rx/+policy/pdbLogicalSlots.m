@@ -12,7 +12,8 @@ function [remLogical, nLogical] = pdbLogicalSlots(logicalOfPhys, nowPhys, remPhy
 %        remPhys        integer, >=0 -- remaining budget in PHYSICAL slots, from
 %                       phy.rx.policy.remainingPdbSlots
 %Outputs: remLogical  integer, >=0 -- the budget expressed as a count of pool slots strictly
-%                     after nowPhys and no later than the deadline. This is what
+%                     after nowPhys and no later than the deadline nowPhys+remPhys-1 (see
+%                     below), 0..remPhys-1. This is what
 %                     candidateSet's req.remainingPdbSlots wants, and therefore the largest
 %                     legal T2.
 %         nLogical    integer, >=0 -- the logical index of nowPhys, i.e. clause 8.1.4's n
@@ -33,9 +34,21 @@ function [remLogical, nLogical] = pdbLogicalSlots(logicalOfPhys, nowPhys, remPhy
 %deadline". Including n would return one too many and let T2 point one opportunity past the
 %deadline -- a single-slot overrun, invisible in any statistic except a deadline-miss count.
 %
-%In the baseline pool (harness.poolAllSlots, every slot a sidelink slot) this function is the
-%identity: remLogical == remPhys. That is a property of that configuration, not of the units,
-%and is exactly why the confusion this function resolves is invisible there.
+%THE BUDGET COUNTS nowPhys; THE RESULT DOES NOT
+%---------------------------------------------
+%remPhys is remainingPdbSlots' figure, and that function's convention includes the current
+%slot: a budget of r means slots nowPhys .. nowPhys+r-1 are usable, and the packet is EXPIRED
+%(sap.lchExpire discards it) in slot nowPhys+r. The last physical slot it may be transmitted in
+%is therefore nowPhys+r-1, and the count after nowPhys is r-1 on the baseline pool. This first
+%counted to nowPhys+r -- the expiry slot itself -- so T2 could point at a slot in which the
+%packet had already been discarded. With PDB 10 ms, the 2-slot decode margin and T2 at the full
+%budget, every event packet whose draw landed on that last slot was selected, never sent, and
+%counted as a loss: 17 of the 18 unsent hazard events (of 239) in the Part C field at
+%10 UE/km^2, which alone put a 1 % PER flow at 91.5 %.
+%
+%In the baseline pool (harness.poolAllSlots, every slot a sidelink slot) the result is
+%remPhys - 1: the units still coincide there, which is exactly why the confusion this function
+%resolves is invisible there.
 %
 %No DFN wrap. Like phy.ts38214.candidateSet, this assumes the window does not cross the end of
 %the 10240 ms period; selection windows are orders of magnitude shorter.
@@ -56,9 +69,9 @@ if nLogical < 0
     error('policy:pdbLogicalSlots:notPoolSlot', 'pdbLogicalSlots: physical slot %s is not in the pool, so clause 8.1.4''s n is undefined there', num2str(nowPhys));
 end
 
-% The deadline is the last physical slot the packet may still be transmitted in. Clamp to the
-% end of the period rather than wrapping.
-deadlinePhys = min(nowPhys + remPhys, nDfnSlots - 1);
+% The deadline is the last physical slot the packet may still be transmitted in: one before the
+% slot remainingPdbSlots reports expired. Clamp to the end of the period rather than wrapping.
+deadlinePhys = min(nowPhys + remPhys - 1, nDfnSlots - 1);
 window       = logicalOfPhys(nowPhys + 2 : deadlinePhys + 1);   % strictly after nowPhys
 remLogical   = nnz(window >= 0);
 end

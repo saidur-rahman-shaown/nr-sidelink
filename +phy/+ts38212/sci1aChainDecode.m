@@ -31,7 +31,7 @@ K = A + 24;                                    % clause 7.3.2 attaches a 24-bit 
 N = phy.lib.ts38212.polarMotherLength(K, E, 9);
 
 recovered = phy.lib.ts38212.polarDeRateMatch(llr(:), K, N, false);
-withCrc   = phy.lib.ts38212.polarDecode(recovered, K, N, listSize, 9, true, 24);
+withCrc   = phy.lib.ts38212.polarDecode(recovered, K, E, listSize, 9, true, 24);
 [sci1aBits, err] = phy.lib.ts38212.dciCrcCheck(withCrc, []);
 crcOk = (err == 0);
 end

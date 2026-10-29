@@ -116,6 +116,20 @@ for f = 1:numel(scen.flows)
     kpi.byFlow(f).withinPdb   = mean(lat <= fl.pdbMs);
     kpi.byFlow(f).goodputKbps = nnz(dOk) * fl.sizeBytes * 8 / runMs;
     kpi.byFlow(f).prr         = nnz(dOk) / max(1, nnz(mine));
+    % PER-PACKET SERIES, in generation order. The percentiles above say how the flow behaved;
+    % this says WHEN. A handful of expiries scattered at random is a different fault from the
+    % same handful in one burst, and no summary statistic separates them -- so every resolved
+    % packet of this flow is kept here with its generation time, its latency (NaN when it was
+    % never delivered, because a lost packet has no latency) and its outcome code.
+    my   = resolved(mine);
+    [tg, ord] = sort(double([my.tGenSlot]));
+    my   = my(ord);
+    lost = [my.outcome] ~= codes.delivered;
+    lat  = double([my.tRxSlot] - [my.tGenSlot]) * msPerSlot;
+    lat(lost) = NaN;
+    kpi.byFlow(f).pktTGenMs    = tg * msPerSlot;
+    kpi.byFlow(f).pktLatencyMs = lat;
+    kpi.byFlow(f).pktOutcome   = [my.outcome];
 end
 assert(sum([kpi.byFlow.nResolved]) == kpi.nResolved, ...
     'kpiReport: every resolved packet must belong to exactly one flow -- %d across flows vs %d resolved', ...
@@ -171,5 +185,6 @@ function t = flowKpiTemplate()
 t = struct('lcid', 0, 'pqi', 0, 'prio', 0, 'pdbMs', 0, 'periodMs', 0, 'sizeBytes', 0, ...
     'nDelivered', 0, 'nExpired', 0, 'nMaxTx', 0, 'nDropped', 0, 'nResolved', 0, ...
     'latencyMs', zeros(1, 0), 'latencyMeanMs', NaN, 'latencyP50Ms', NaN, 'latencyP90Ms', NaN, ...
-    'latencyP99Ms', NaN, 'latencyMaxMs', NaN, 'withinPdb', NaN, 'goodputKbps', 0, 'prr', NaN);
+    'latencyP99Ms', NaN, 'latencyMaxMs', NaN, 'withinPdb', NaN, 'goodputKbps', 0, 'prr', NaN, ...
+    'pktTGenMs', zeros(1, 0), 'pktLatencyMs', zeros(1, 0), 'pktOutcome', zeros(1, 0));
 end

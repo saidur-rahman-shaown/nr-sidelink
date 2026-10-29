@@ -1,0 +1,479 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{array,tabularx}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+\captionsetup[table]{position=top,skip=4pt,labelfont=bf}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlist{itemsep=3pt,topsep=4pt}
+\titlespacing*{\section}{0pt}{11pt}{5pt}
+\titlespacing*{\subsection}{0pt}{8pt}{3pt}
+\newcommand{\field}[1]{\textbf{#1:}~}
+\newcommand{\hz}[1]{{\color{blue}[#1 --- HZ]}}
+\setlength{\emergencystretch}{2em}
+
+\title{\textbf{NR Sidelink Measurement Plan}\\[0.4em]
+\large Reliable Communication Between Agricultural Machines}
+\author{}
+\date{Study plan: 26 October 2026}
+
+\begin{document}
+\maketitle
+
+\section{Study goal}
+
+The goal is to find out how well NR sidelink Mode 2 can support communication
+between agricultural machines. We want to know when messages arrive on time,
+when communication becomes unreliable, and what causes the change.
+
+The study will answer five questions:
+\begin{enumerate}
+  \item \textbf{Can we trust the measurements?}
+        Do the communication procedures, packet counts, and timing checks
+        give the expected results?
+  \item \textbf{How well are messages delivered?}
+        How many arrive before their deadline, how long do they take,
+        and how long can a machine go without a useful update?
+  \item \textbf{Where does communication work well?}
+        How do distance, movement, blocked paths, and the number of machines
+        change delivery?
+  \item \textbf{What helps, and what does it cost?}
+        How much do repeated transmissions and delivery feedback help?
+        How much extra delay and radio resource do they require?
+  \item \textbf{What does this mean for farm work?}
+        Under which conditions can the communication needs of a harvester,
+        grain cart, or group of machines be met?
+\end{enumerate}
+
+The main outcome will be a clear account of the conditions under which each
+application meets its communication needs. Useful data rate will also be
+measured, especially when many machines are active.
+
+This is a simulation study. Physical radio measurements can later test how
+well its findings carry over to actual equipment.
+
+\section{Measurements}
+\label{sec:metrics}
+
+Before each experiment, state the message size, how often messages are
+created, who should receive them, and the delivery deadline. Set these from
+the application's needs before judging the result.
+
+\begin{table}[htbp]
+\centering
+\caption{Measurements and their meaning}
+\label{tab:metrics}
+\small
+\begin{tabularx}{\textwidth}{lY}
+\toprule
+\textbf{Measurement} & \textbf{What it tells us} \\
+\midrule
+Delivery before the deadline &
+The share of expected message deliveries that happen on time. This is the
+main measure of reliability. \\
+Message delay &
+Time from message creation at the sending application to delivery at the
+receiving application. \\
+Delay variation &
+How much delay changes between consecutive messages. \\
+Gap between updates &
+How long the receiver waits between successful updates. For coordination,
+also measure the gap between fresh updates that arrive on time. \\
+Loss bursts &
+How many messages in a row miss their deadline. \\
+Useful data rate &
+Application data delivered per second, counting each message once at each
+intended receiver. \\
+Radio resource use &
+How much of the shared radio resource is used, and how much is needed to
+deliver one useful message. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Two simple calculations are central:
+\begin{equation}
+\text{On-time delivery (\%)} =
+100 \times
+\frac{\text{Expected deliveries completed before the deadline}}
+     {\text{All expected deliveries}}.
+\label{eq:delivery}
+\end{equation}
+\begin{equation}
+\text{Message delay} =
+\text{Application delivery time} - \text{Application creation time}.
+\label{eq:delay}
+\end{equation}
+
+For example, if 1,000 messages should reach one machine and 990 arrive before
+their deadline, on-time delivery is 99\%. If a message should reach several
+machines, count its expected delivery to each machine separately.
+
+Report typical delay and the slower end of the delay distribution. The median
+is the middle delay. The 95th and 99th percentiles are the delays within which
+95\% and 99\% of delivered messages arrive. Show these beside the delivery
+percentage, because delay values alone leave out messages that never arrive.
+
+Also report what share of all expected deliveries is complete by each elapsed
+time. If 99\% have not arrived by the end of observation, say that the
+all-message 99th percentile was not reached.
+
+For delay variation, compare consecutive generated messages only when both
+arrive. Keep missing messages visible in the loss and gap results.
+
+\section{Experiments}
+\label{sec:experiments}
+
+Each experiment has one main goal. Begin with simple cases, then add distance,
+movement, repeated transmissions, and more machines.
+
+\begin{table}[htbp]
+\centering
+\caption{Experiment overview}
+\small
+\begin{tabularx}{\textwidth}{lYY}
+\toprule
+\textbf{Test} & \textbf{Goal} & \textbf{Main result} \\
+\midrule
+M0: Measurement checks & Check that results can be trusted &
+Evidence that timing, delivery, and radio procedures behave as expected. \\
+M1: Simple link & Establish a reference &
+Delay, delivery, and useful data rate under easy conditions. \\
+M2: Distance & Find the working range &
+Delivery and delay as machines move farther apart. \\
+M3: Movement & Find the effect of speed and changing position &
+Delivery, delay, and update gaps during movement. \\
+M4: Repeated transmissions & Find the benefit and cost of retries &
+Delivery improvement, added delay, and extra resource use. \\
+M5: More machines & Find how much traffic can be supported &
+The point at which the application target stops being met. \\
+M6: Farm tasks & Check application needs &
+Working conditions for selected agricultural tasks. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{M0: Check that the measurements can be trusted}
+
+\field{Goal} Confirm that the basic measurements and communication procedures
+are correct before drawing performance conclusions.
+
+\field{Test} Start with cases whose answers are already known. Check that
+every created message is accounted for, a known delivery time gives the
+correct delay, and a deliberately lost message appears as a loss. Check
+received power, noise, and available space for data against simple calculations.
+
+Then check the main communication steps: finding a resource, announcing a
+transmission, receiving data, handling repeated copies, sending delivery
+feedback, and dropping messages after their allowed waiting time.
+Include a case where a machine is transmitting when it should receive.
+
+Compare the relevant procedures with independent examples and the applicable
+sidelink rules~\cite{ts38214}. Test reception across a range of signal
+conditions. Separate failures to read the control information from failures
+to read the message data.
+
+Where a simplified calculation predicts detailed reception results, check
+its accuracy on separate cases that were not used to adjust it. Include
+interference and repeated transmissions. Set the allowed prediction error
+before making the comparison.
+
+\field{Result} A record of what passed, what failed, and the conditions covered
+by each check. Correct problems affecting later experiments before continuing.
+
+\subsection{M1: Establish the simple-link reference}
+
+\field{Goal} Measure communication between two machines under easy conditions.
+
+\field{Test} Place two stationary machines close together with a clear path
+between them. Send messages at the application's normal rate. Measure delay,
+on-time delivery, update gaps, and useful data rate.
+
+Run a separate test with data always waiting to be sent. This shows the
+rate the tested communication arrangement can sustain. Record queue growth
+and radio resource use as well as delivered data.
+
+\field{Result} A reference for later comparisons. Show where time is spent:
+preparing a message, waiting to send, completing transmission and any retries,
+and delivering it to the receiving application.
+
+Keep the normal-message test and the maximum-load test separate. They answer
+different questions.
+
+\subsection{M2: Find how distance changes communication}
+
+\field{Goal} Find the distances over which the application target can be met.
+
+\field{Test} Keep the machines stationary and increase their separation.
+Compare a clear path with a blocked or obstructed path. Keep the remaining
+settings the same.
+
+Use an initial trial to locate the distance where delivery starts to fall.
+Then choose the full distance range and closer spacing around that change
+before collecting the main results. Describe any obstruction clearly;
+a general obstructed-path case does not by itself represent a machine body.
+
+\field{Result} Plot on-time delivery, delay, update gaps, and useful data rate
+against distance. For a stated deadline, report the tested distances meeting
+90\% and 99\% delivery, or the application's own target.
+
+Show the last passing distance and the next distance where the target is
+missed or the evidence is unclear. If the target is still met at the farthest
+tested point, report that tested distance as a lower bound on range.
+
+A range based only on receiving one transmission successfully must be reported
+separately from the range for delivering application messages on time.
+
+\subsection{M3: Find how movement changes communication}
+
+\field{Goal} Find whether movement causes extra delay, losses, or long gaps
+between useful updates.
+
+\field{Test} Begin with one stationary machine and one machine moving past it.
+Repeat at speeds relevant to the farm task. Include an approach and a departure.
+Then test both machines moving, with their directions clearly stated.
+
+Compare moving and stationary cases at similar distances. Repeat complete
+passes and record how long each pass spends in each distance range.
+
+\field{Result} Show delivery, delay, and update gaps against both distance and
+speed. Identify where movement changes performance and whether the receiver
+can still follow the changing radio signal.
+
+If a distance range has too few observations, show that limitation instead
+of giving it the same weight as a well-observed range.
+
+\subsection{M4: Find whether repeated transmissions are worthwhile}
+
+\field{Goal} Measure how much repeated transmissions improve delivery and what
+they add in delay and radio resource use.
+
+\field{Test} Compare three cases:
+\begin{enumerate}
+  \item Send the message once.
+  \item Send a planned repeat without waiting for delivery feedback.
+  \item Repeat when delivery feedback shows that another attempt is needed.
+\end{enumerate}
+
+Make this comparison for the same sender, intended receiver, message traffic,
+and radio conditions. Give the two repeating methods the same limit on the
+number of attempts. Choose easy, moderate, and difficult distances during
+the initial trial, before collecting the main results.
+
+First keep the radio resource layout the same to compare the retry methods.
+Then include the change in resources needed for feedback to measure the
+overall benefit and cost. Study repeats to several receivers separately.
+
+\field{Result} Show the gain in on-time delivery beside the change in delay,
+number of attempts, feedback failures, and resources used per delivered
+message. Check whether a retry arrives early enough to help the application.
+
+\subsection{M5: Find how many machines and messages can be supported}
+
+\field{Goal} Find how performance changes as more machines share the channel.
+
+\field{Test} Keep the field area fixed and increase the number of machines.
+First hold each machine's message rate constant. Then increase the message
+rate and test a case where many machines send an event message at the same
+time.
+
+Repeat the test with new machine positions and radio conditions. Compare
+machines at similar distances, and record how busy the channel appears to
+each machine.
+
+\field{Result} Show on-time delivery, delay, update gaps, useful data rate,
+waiting queues, and resource use against machine count and message load.
+Report results for individual machines as well as the overall average.
+
+Investigate losses caused by waiting too long, being unable to receive while
+transmitting, and failures to read control information or data. Use transmission
+records to check whether overlapping transmissions explain the failures.
+
+Report the largest tested machine count and message load that meet the
+application target with enough confidence. State the field size, traffic,
+and radio conditions beside that result.
+
+\subsection{M6: Check the communication needs of farm tasks}
+
+\field{Goal} Connect the measurements to the needs of agricultural applications.
+
+\field{Test} Study the following tasks:
+\begin{table}[htbp]
+\centering
+\caption{Agricultural tasks and their communication questions}
+\small
+\begin{tabularx}{\textwidth}{YY}
+\toprule
+\textbf{Task} & \textbf{Question} \\
+\midrule
+Harvester and grain cart &
+Do coordination messages arrive on time as separation and relative position
+change? How long can the gap between useful updates become? \\
+Several machines working together &
+What happens during parallel passes, turns at the field edge, and messages
+sent by several machines at once? \\
+Messages to a field gateway &
+Can machines send updates reliably to another sidelink device acting as a
+gateway? How do feedback and packet recovery change delay and delivery? \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+For each task, first state the message size, message rate, deadline, delivery
+target, and longest acceptable update gap. Include the required distances,
+speeds, and number of machines.
+
+Follow complete task segments, including turns or position changes that matter
+to communication. Identify whether the paths are recorded machine movements
+or constructed examples.
+
+When comparing packet recovery above the radio layer, keep radio retries
+unchanged. When comparing radio retries, keep the other recovery settings
+unchanged. Measure delivery at the application so that waiting, recovery,
+and reassembly are included.
+
+\field{Result} A table showing which combinations of distance, speed, machine
+count, and message load meet each task's needs, miss them, or need more evidence.
+
+\section{Fair comparisons}
+
+\begin{itemize}
+  \item \textbf{Change one main condition at a time.}
+        After understanding its effect, test important combinations such as
+        distance with obstruction, speed with transmission rate settings,
+        and machine count with message load.
+  \item \textbf{Compare the same situation.}
+        Keep machine paths, generated messages, and outside radio conditions
+        matched when comparing methods. A shared random seed alone does not
+        guarantee this.
+  \item \textbf{Count every expected delivery.}
+        Decide the intended receivers when each message is created. Keep
+        failed deliveries in the results, including messages that expire
+        before being sent. Count repeated copies only once.
+  \item \textbf{Give the final messages enough time.}
+        Continue normal traffic while the final measured messages reach
+        their deadlines. Set an extra observation period for late arrivals
+        before the test begins, and report messages still undelivered at its end.
+  \item \textbf{Keep timing definitions consistent.}
+        State where every delay measurement starts and ends. Record added
+        processing delays explicitly.
+  \item \textbf{Keep data-rate counts clear.}
+        Separate unique transmitted data from copies delivered to multiple
+        receivers. Record the time interval used to calculate each rate.
+\end{itemize}
+
+Set the application targets explicitly. Meeting an on-time delivery target
+does not by itself establish every standardized quality-of-service
+requirement~\cite{ts23287,ts23501}.
+
+\section{Deciding whether a target is met}
+
+Begin with a small trial to choose sensible test distances, run lengths,
+settling time, and numbers of repeats. Check that queues and resource choices
+have settled before counting the main measurements. Set the final experiment
+conditions and analysis rules before the main study. Keep the trial data
+separate.
+
+Repeat whole experiments with new positions, radio conditions, or movement
+passes. Messages from one run often share the same conditions. Deliveries of
+one broadcast message to many receivers also share conditions. Account for
+these links when estimating uncertainty; they are not all independent repeats.
+
+Show a 95\% confidence interval with the main results. This gives a range
+showing the uncertainty in the estimate. For delivery targets:
+\begin{itemize}
+  \item \textbf{Met:} the whole interval is at or above the target.
+  \item \textbf{Missed:} the whole interval is below the target.
+  \item \textbf{Unclear:} the interval includes both passing and failing values.
+\end{itemize}
+
+For a 99\% target, an interval of 99.1--99.6\% supports a pass.
+An interval of 98.4--98.9\% supports a miss. An interval of 98.8--99.2\%
+leaves the decision unclear.
+
+For network results, estimate uncertainty by repeating or resampling whole
+runs, keeping the messages within each run together. For independent reception
+trials, use intervals appropriate for counts of successes and failures~\cite{nist}.
+State the calculation used, including whether an interval is one-sided or
+two-sided. Use the same rule throughout each comparison.
+
+A short test with no observed losses does not prove perfect delivery.
+Very high reliability targets need enough independent evidence. If the
+planned measurements cannot resolve a target, report the result as unclear.
+Do not keep adding runs only until the desired answer appears.
+
+When reporting a range or capacity limit, show the neighboring tested points
+and their uncertainty. Distinguish confidence at individual points from
+confidence in an entire range.
+
+\section{Records and results}
+
+Keep a record of the experiment conditions, machine positions and movements,
+message creation and delivery times, intended receivers, transmission attempts,
+feedback, and reasons for missed delivery. Record failures as carefully as
+successes. Save the study version and enough information to repeat each test.
+
+Check that all generated messages are accounted for. Report messages that
+arrived on time, arrived late, were dropped, or were still undelivered when
+observation ended. Mark interrupted tests separately.
+
+For each experiment, report:
+\begin{enumerate}
+  \item The question and the conditions tested.
+  \item Delivery percentage, delay, update gaps, and useful data rate.
+  \item Differences between repeated runs and between machines.
+  \item The confidence interval and target decision.
+  \item The observations that explain the result.
+\end{enumerate}
+
+Present the main findings in this order: measurement checks, simple-link
+reference, distance, movement, repeated transmissions, machine count and
+load, and farm tasks. Produce the tables and figures from the saved records
+so every reported result can be checked.
+
+\section{Order of work}
+
+\begin{enumerate}
+  \item Agree on the application questions and delivery targets.
+  \item Complete the basic measurement checks in M0.
+  \item Run the small trial and set the final conditions and repeat counts.
+  \item Finish the remaining M0 checks under those conditions.
+  \item Complete M1 and M2, followed by M3 and M4, then M5 and M6.
+  \item Check the records, calculate uncertainty, and judge each target.
+  \item Explain where communication meets the application's needs and where
+        it needs improvement.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+
+\bibitem{ts38214}
+3GPP TS 38.214 V16.17.0, \emph{NR; Physical layer procedures for data},
+Release 16, clauses 8.1.3--8.1.4.
+\url{https://www.etsi.org/deliver/etsi_ts/138200_138299/138214/16.17.00_60/ts_138214v161700p.pdf}.
+
+\bibitem{ts23287}
+3GPP TS 23.287 V19.0.0, \emph{Architecture enhancements for 5G System (5GS)
+to support Vehicle-to-Everything (V2X) services}, clauses 5.4.3--5.4.4.
+\url{https://www.etsi.org/deliver/etsi_ts/123200_123299/123287/19.00.00_60/ts_123287v190000p.pdf}.
+
+\bibitem{ts23501}
+3GPP TS 23.501 V18.8.0, \emph{System architecture for the 5G System (5GS)},
+clauses 5.7.3.4--5.7.3.5.
+\url{https://www.etsi.org/deliver/etsi_ts/123500_123599/123501/18.08.00_60/ts_123501v180800p.pdf}.
+
+\bibitem{nist}
+NIST, \emph{Exact Binomial Confidence Limits}, Dataplot Reference Manual.
+\url{https://itl.nist.gov/div898/software/dataplot/refman2/auxillar/exacbici.htm}.
+
+\end{thebibliography}
+\end{document}

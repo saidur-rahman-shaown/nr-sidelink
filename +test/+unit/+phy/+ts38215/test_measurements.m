@@ -60,30 +60,41 @@ catch e
 end
 
 %% slRssi -- clause 5.1.25, "starting from the 2nd OFDM symbol"
-% Symbol 0 (the AGC symbol) is loaded with 100 W/RE and symbols 1..3 with 2 W/RE, so including
-% it would give (12*100 + 36*2)/48 = 26.5 W instead of 2 W. A 13x-off answer, deliberately:
-% this exclusion is easy to drop and easy to apply twice.
+% SL RSSI is the TOTAL power over the sub-channel in a symbol, linearly averaged over symbols (the
+% wording of NR carrier RSSI, clause 5.1.3, whose RSRQ = N x RSRP / RSSI makes it the power of all
+% N RBs). Symbol 0 (the AGC symbol) is loaded with 100 W/RE and symbols 1..3 with 2 W/RE: each
+% measured symbol carries 12 x 2 = 24 W, so 24 W. Including symbol 0 gives (1200 + 3*24)/4 = 318 W;
+% averaging per RE (the reading before 2026-10-28) gives 2 W.
+% Level 2: the independent-verifier read the clause the same way from the spec text alone (2026-10-28)
+% and computed 24 / 24 / 36 / 108 / 0 W for the cases below. pending-human: the total-not-per-RE
+% reading (from 5.1.3's RSRQ = N x RSRP / RSSI), and "2nd OFDM symbol" = the 2nd configured symbol.
 gridR = zeros(12, 4);
 gridR(:, 1) = 10;             % |10|^2 = 100 W per RE, symbol l=0
 gridR(:, 2:4) = sqrt(2);      % |sqrt(2)|^2 = 2 W per RE, symbols l=1,2,3
 [rssiW, rssiDbm, nReR] = phy.ts38215.slRssi(gridR, 0, 1, [0 1 2 3]);
-assert(abs(rssiW - 2) < tol, 'slRssi: clause 5.1.25 starts at the 2nd OFDM symbol, so the AGC symbol must be excluded -- expected 2 W, got %g (26.5 W means it was included)', rssiW);
+assert(abs(rssiW - 24) < tol, 'slRssi: expected 24 W (12 REs x 2 W per symbol); 318 W means the AGC symbol was included, 2 W means a per-RE average, got %g', rssiW);
 assert(nReR == 36, 'slRssi: expected 3 measured symbols x 12 subcarriers = 36 REs, got %d', nReR);
-assert(abs(rssiDbm - (10*log10(2) + 30)) < tol, 'slRssi: rssiDbm must be 10*log10(rssiW)+30');
+assert(abs(rssiDbm - (10*log10(24) + 30)) < tol, 'slRssi: rssiDbm must be 10*log10(rssiW)+30');
 
-% RSSI is TOTAL received power over every RE of the sub-channel, not just reference signals:
-% an empty (zero) RE drags the average down rather than being skipped.
+% Every RE of the sub-channel counts, not just reference signals; an empty RE adds nothing.
 gridZ = zeros(12, 3);
 gridZ(1:6, 2) = 2;            % lower half of the PRB at |2|^2 = 4 W, upper half left empty,
 gridZ(1:6, 3) = 2;            % in both measured symbols l=1 and l=2
 rssiZ = phy.ts38215.slRssi(gridZ, 0, 1, [0 1 2]);
-assert(abs(rssiZ - 2) < tol, 'slRssi: expected the total-power average over all 24 measured REs (12 at 4 W + 12 at 0 W = 48/24) = 2 W, got %g -- skipping empty REs would give 4 W', rssiZ);
+assert(abs(rssiZ - 24) < tol, 'slRssi: expected 6 REs x 4 W = 24 W per symbol, averaged over 2 symbols = 24 W, got %g (2 W is a per-RE average)', rssiZ);
+
+% Two PRBs and unequal symbols: symbol 1 at 1 W/RE (24 W over 24 REs), symbol 2 at 2 W/RE (48 W):
+% the linear average over symbols is 36 W. Per RE it would be 1.5 W -- the 10*log10(24) gap.
+gridP = zeros(24, 3);
+gridP(:, 2) = 1; gridP(:, 3) = sqrt(2);
+rssiP = phy.ts38215.slRssi(gridP, 0, 2, [0 1 2]);
+assert(abs(rssiP - 36) < tol, 'slRssi: expected (24 + 48)/2 = 36 W over a 2-PRB sub-channel, got %g', rssiP);
 
 % Sub-channel offset: measuring PRB 2 must read subcarriers 24..35, not 0..11.
 gridS = zeros(48, 3);
 gridS(25:36, 2:3) = 3;        % |3|^2 = 9 W per RE, PRB 2 only
 rssiS = phy.ts38215.slRssi(gridS, 2, 1, [0 1 2]);
-assert(abs(rssiS - 9) < tol, 'slRssi: prbStart=2 must address subcarriers 24..35, expected 9 W, got %g', rssiS);
+assert(abs(rssiS - 108) < tol, 'slRssi: prbStart=2 must address subcarriers 24..35, expected 12 x 9 = 108 W, got %g', rssiS);
 rssiS0 = phy.ts38215.slRssi(gridS, 0, 1, [0 1 2]);
 assert(rssiS0 == 0, 'slRssi: PRB 0 is empty in this grid, expected 0 W, got %g', rssiS0);
 

@@ -1,4 +1,4 @@
-function bler = pscchBler(mcs, sinrDb)
+function bler = pscchBler(mcs, sinrDb, channelModel, speedKmh)
 %pscchBler PSCCH block error rate, from the measured link-level table.
 %Spec:   none -- PHY abstraction.
 %Inputs: mcs     integer, 0..31 -- the I_MCS of the PSSCH this PSCCH accompanies. PSCCH itself
@@ -23,5 +23,12 @@ function bler = pscchBler(mcs, sinrDb)
 %doing. That is exactly why a receiver at range decodes the SCI and loses the transport block,
 %which is the case that yields a NACK rather than a DTX.
 
-bler = harness.phyabs.blerInterp(harness.phyabs.blerTable(), 'pscch', mcs, sinrDb, 1);
+% With a key, the table measured at that channel and speed (harness.phyabs.blerTableFor);
+% without, the shipped table, as before.
+if nargin < 4
+    tbl = harness.phyabs.blerTable();
+else
+    tbl = harness.phyabs.blerTableFor(channelModel, speedKmh);
+end
+bler = harness.phyabs.blerInterp(tbl, 'pscch', mcs, sinrDb, 1);
 end

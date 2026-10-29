@@ -42,6 +42,26 @@ function p = defaults()
 %                    Default 1 slot -- the smallest non-zero value, and therefore deliberately
 %                    OPTIMISTIC: a real UE needs longer, and a longer value pushes
 %                    retransmissions further out and lengthens the latency tail.
+%   .t2MaxMs         real, >0 or Inf -- cap on the selection-window end T2, ms. TS 38.214 8.1.4
+%                    lets the UE choose T2 anywhere in [T2min, remaining PDB]; selectionWindow
+%                    takes the PDB end and the draw is uniform, so the first resource lands on
+%                    average half a PDB out. For PERIODIC traffic a T2 beyond P_rsvp_TX can put
+%                    the first resource more than one period away, and a grant sized for one
+%                    period's arrivals then carries a standing one-packet backlog for its whole
+%                    life. The cap is applied by the caller, never below T2min (stack.txSlot
+%                    applies the same rule as stack.defaults.t2MaxMs). Default Inf (no cap).
+%   .sizeEventFlows  logical -- whether a persistent grant is sized for Poisson (event) flows'
+%                    arrivals as well as periodic ones. true: one event SDU per period is reserved
+%                    (ceil of P_rsvp / mean inter-arrival), even when events arrive in few periods.
+%                    false: size for periodic flows only; an event rides the grant if it fits, else
+%                    clause 5.22.1.2's triggers reselect. Default true (the original behaviour).
+%   .prepSlots       integer, >=0 -- slots an SDU must have been queued before it may go into a
+%                    transport block, on ANY grant. A new selection already waits T1 >= T_proc,1;
+%                    an SDU arriving while the UE holds a grant could otherwise ride an
+%                    opportunity in its own arrival slot, with no time to build the TB. Setting
+%                    it to T_proc,1 makes T1 the floor on every first transmission, so the
+%                    shortest latency is the same whatever grant carries the packet. Default 0
+%                    (the original behaviour: an SDU may use an opportunity in its arrival slot).
 %   .maxEscalations  positive integer -- safety bound handed to phy.ts38214.candidateSet for
 %                    its clause 8.1.4 step 7 loop. Default 10. Not a spec quantity: the loop
 %                    provably converges, and this turns a logic defect into an error rather
@@ -57,5 +77,8 @@ p = struct( ...
     'prsvpTxMs',      100, ...
     'numRetx',        1, ...
     'psfchProcSlots', 1, ...
+    't2MaxMs',        Inf, ...
+    'sizeEventFlows', true, ...
+    'prepSlots',      0, ...
     'maxEscalations', 10);
 end

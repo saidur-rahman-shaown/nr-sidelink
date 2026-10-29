@@ -33,7 +33,8 @@ function [sinrDb, rxPowerDbm, canHear, sinrPscchDb] = slotSinr(air, posXY, radio
 %INTERFERENCE IS SCALED BY FREQUENCY OVERLAP
 %-------------------------------------------
 %Two transmissions in the same slot interfere only where their sub-channel ranges overlap, and
-%an interferer covering half the victim's bandwidth contributes half its power. Full power
+%an interferer contributes the share of ITS OWN power that lands in the victim's band:
+%P_k x nOverlap / L_k (it spreads P_k evenly over its L_k sub-channels). Full power
 %regardless of overlap over-states interference in a lightly-loaded pool; ignoring partial
 %overlap under-states it in a heavily-loaded one. Both matter here, so the fraction is carried.
 %
@@ -106,7 +107,11 @@ for i = 1:nTx
         if nOverlap == 0
             continue;
         end
-        interfMw = interfMw + rxPowerMw(k, :) * (nOverlap / air(i).LsubCH);
+        % Transmission k spreads its power over ITS OWN L_subCH, so the share landing inside the
+        % victim's band is nOverlap / L_k. This read nOverlap / L_i -- correct only when the two
+        % widths match, 7 dB high for a 5-sub-channel interferer on a 1-sub-channel victim and
+        % low the other way round. The PSCCH branch below already scales by the interferer.
+        interfMw = interfMw + rxPowerMw(k, :) * (nOverlap / air(k).LsubCH);
     end
 
     sinrDb(i, :) = 10 * log10(rxPowerMw(i, :) ./ (nMw + interfMw));

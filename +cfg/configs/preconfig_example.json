@@ -1,103 +1,586 @@
 {
-  "_comment": "Reference config 1/3 for the B0 gate. FR1, 20 MHz-class carrier, SCS 30 kHz (mu=1), single Mode-2 (UE-selected/sensing) resource pool used for both RX and TX. ARFCN/frequency values are illustrative round numbers, not calibrated to a real ITS band -- cfgValidate does not check RF calibration.",
+  "_comment": "Reference config 1/3 for the B0 gate, and the stored config the +stack access-stratum pipeline runs from. FR1, SCS 30 kHz (mu=1), one 50-PRB SL BWP at PRB 0 (locationAndBandwidth 13475 = RIV for L=50, start 0 with N=275; the earlier value 1099 encodes a 273-PRB BWP, which does not fit the 51-PRB carrier), single Mode-2 pool used for RX and TX. PSFCH every slot (sl-PSFCH-Period sl1), on PRBs 0..9 of the pool (sl-PSFCH-RB-Set: 2 PRBs per sub-channel), 2 cyclic-shift pairs, sl-MinTimeGapPSFCH 2 slots, startSubCH. HARQ feedback is ENABLED on the unicast logical channel only; broadcast stays blind-retransmission. sl-MaxNumConsecutiveDTX n8 drives HARQ-based sidelink RLF. Three sidelink DRBs, PQIs from TS 23.287 V19.0.0 Table 5.4.4-1 (broadcast may use only the Non-GBR rows 55-59, NOTE 1): SLRB 1 broadcast (PQI 58, 100 ms, priority 4, UM, no SDAP header: TS 37.324 6.2.1 allows none on gc/bc, so a gc/bc SLRB cannot be a default SLRB either), SLRB 2 broadcast low-latency (PQI 56, 20 ms, priority 6, UM), SLRB 3 unicast default (PQI 23, GBR, 100 ms, priority 3, AM). Congestion control (TS 38.214 8.1.6): S-RSSI threshold -94 dBm, CBR over 100 ms, CR over 1000 ms, five CBR ranges (upper bounds 0.2/0.4/0.6/0.8/1.0) with sl-CR-Limit 1.0/0.6/0.3/0.12/0.05 for every priority. Every SLRB delivers out of order (sl-OutOfOrderDelivery), so PDCP never holds a packet behind a missing one. Each logical channel's sl-Priority equals the PQI priority level of the flows it carries, and each sl-DiscardTimer equals their PDB, so the PDB is enforced by PDCP discard. sl-MultiReserveResource is enabled in both pools so SCI-1A carries the reservation period {0, 100 ms} and a UE can run sensing-based SPS (stack.defaults prsvpTxMs). sl-ProbResourceKeep v0dot8: the SAE J3161 deployment-profile value (0.8), the probability an SPS grant keeps its resources when its reselection counter expires. ARFCN values are illustrative.",
   "preconfig": {
     "sl-PreconfigFreqInfoList-r16": [
       {
         "sl-SCS-SpecificCarrierList-r16": [
-          { "offsetToCarrier": 0, "subcarrierSpacing": "kHz30", "carrierBandwidth": 51 }
+          {
+            "offsetToCarrier": 0,
+            "subcarrierSpacing": "kHz30",
+            "carrierBandwidth": 51
+          }
         ],
         "sl-AbsoluteFrequencyPointA-r16": 620000,
         "valueN-r16": 0,
         "sl-BWP-List-r16": [
           {
             "sl-BWP-Generic-r16": {
-              "sl-BWP-r16": { "locationAndBandwidth": 1099, "subcarrierSpacing": "kHz30" },
+              "sl-BWP-r16": {
+                "locationAndBandwidth": 13475,
+                "subcarrierSpacing": "kHz30"
+              },
               "sl-LengthSymbols-r16": "sym14",
               "sl-StartSymbol-r16": "sym0"
             },
             "sl-BWP-PoolConfigCommon-r16": {
               "sl-RxPool-r16": [
-                { "sl-SubchannelSize-r16": "n10", "sl-StartRB-Subchannel-r16": 0, "sl-NumSubchannel-r16": 5,
+                {
+                  "sl-SubchannelSize-r16": "n10",
+                  "sl-StartRB-Subchannel-r16": 0,
+                  "sl-NumSubchannel-r16": 5,
                   "sl-RB-Number-r16": 50,
-                  "sl-TimeResource-r16": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-                  "sl-PSCCH-Config-r16": { "case": "setup", "setup": {
-                    "sl-TimeResourcePSCCH-r16": "n2", "sl-FreqResourcePSCCH-r16": "n10",
-                    "sl-DMRS-ScrambleID-r16": 0, "sl-NumReservedBits-r16": 2 } },
-                  "sl-PSSCH-Config-r16": { "case": "setup", "setup": {
-                    "sl-PSSCH-DMRS-TimePatternList-r16": [2, 3], "sl-Scaling-r16": "f1" } },
+                  "sl-TimeResource-r16": [
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1,
+                    1
+                  ],
+                  "sl-PSCCH-Config-r16": {
+                    "case": "setup",
+                    "setup": {
+                      "sl-TimeResourcePSCCH-r16": "n2",
+                      "sl-FreqResourcePSCCH-r16": "n10",
+                      "sl-DMRS-ScrambleID-r16": 0,
+                      "sl-NumReservedBits-r16": 2
+                    }
+                  },
+                  "sl-PSSCH-Config-r16": {
+                    "case": "setup",
+                    "setup": {
+                      "sl-PSSCH-DMRS-TimePatternList-r16": [
+                        2,
+                        3
+                      ],
+                      "sl-Scaling-r16": "f1",
+                      "sl-BetaOffsets2ndSCI-r16": [
+                        0,
+                        2,
+                        4,
+                        6
+                      ]
+                    }
+                  },
+                  "sl-ThreshS-RSSI-CBR-r16": 9,
+                  "sl-TimeWindowSizeCBR-r16": "ms100",
+                  "sl-TimeWindowSizeCR-r16": "ms1000",
                   "sl-UE-SelectedConfigRP-r16": {
+                    "sl-CBR-PriorityTxConfigList-r16": [
+                      {
+                        "sl-PriorityThreshold-r16": 8,
+                        "sl-DefaultTxConfigIndex-r16": 0,
+                        "sl-CBR-ConfigIndex-r16": 0,
+                        "sl-Tx-ConfigIndexList-r16": [0, 1, 2, 3, 4]
+                      }
+                    ],
                     "sl-RS-ForSensing-r16": "pssch",
+                    "sl-MultiReserveResource-r16": "enabled",
                     "sl-SensingWindow-r16": "ms100",
                     "sl-SelectionWindowList-r16": [
-                      {"sl-Priority-r16":1,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":2,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":3,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":4,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":5,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":6,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":7,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":8,"sl-SelectionWindow-r16":"n20"}
+                      {
+                        "sl-Priority-r16": 1,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 2,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 3,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 4,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 5,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 6,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 7,
+                        "sl-SelectionWindow-r16": "n20"
+                      },
+                      {
+                        "sl-Priority-r16": 8,
+                        "sl-SelectionWindow-r16": "n20"
+                      }
                     ],
-                    "sl-Thres-RSRP-List-r16": [20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20],
+                    "sl-Thres-RSRP-List-r16": [
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20,
+                      20
+                    ],
                     "sl-ResourceReservePeriodList-r16": [
-                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms0"},
-                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms100"}
+                      {
+                        "case": "sl-ResourceReservePeriod1-r16",
+                        "sl-ResourceReservePeriod1-r16": "ms0"
+                      },
+                      {
+                        "case": "sl-ResourceReservePeriod1-r16",
+                        "sl-ResourceReservePeriod1-r16": "ms100"
+                      }
                     ]
                   },
                   "sl-TxPercentageList-r16": [
-                    {"sl-Priority-r16":1,"sl-TxPercentage-r16":"p50"},
-                    {"sl-Priority-r16":2,"sl-TxPercentage-r16":"p50"},
-                    {"sl-Priority-r16":3,"sl-TxPercentage-r16":"p35"},
-                    {"sl-Priority-r16":4,"sl-TxPercentage-r16":"p35"},
-                    {"sl-Priority-r16":5,"sl-TxPercentage-r16":"p20"},
-                    {"sl-Priority-r16":6,"sl-TxPercentage-r16":"p20"},
-                    {"sl-Priority-r16":7,"sl-TxPercentage-r16":"p20"},
-                    {"sl-Priority-r16":8,"sl-TxPercentage-r16":"p20"}
+                    {
+                      "sl-Priority-r16": 1,
+                      "sl-TxPercentage-r16": "p50"
+                    },
+                    {
+                      "sl-Priority-r16": 2,
+                      "sl-TxPercentage-r16": "p50"
+                    },
+                    {
+                      "sl-Priority-r16": 3,
+                      "sl-TxPercentage-r16": "p35"
+                    },
+                    {
+                      "sl-Priority-r16": 4,
+                      "sl-TxPercentage-r16": "p35"
+                    },
+                    {
+                      "sl-Priority-r16": 5,
+                      "sl-TxPercentage-r16": "p20"
+                    },
+                    {
+                      "sl-Priority-r16": 6,
+                      "sl-TxPercentage-r16": "p20"
+                    },
+                    {
+                      "sl-Priority-r16": 7,
+                      "sl-TxPercentage-r16": "p20"
+                    },
+                    {
+                      "sl-Priority-r16": 8,
+                      "sl-TxPercentage-r16": "p20"
+                    }
                   ],
-                  "sl-PreemptionEnable-r16": "enabled"
+                  "sl-PreemptionEnable-r16": "enabled",
+                  "sl-PSFCH-Config-r16": {
+                    "case": "setup",
+                    "setup": {
+                      "sl-PSFCH-Period-r16": "sl1",
+                      "sl-PSFCH-RB-Set-r16": [
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                      ],
+                      "sl-NumMuxCS-Pair-r16": "n2",
+                      "sl-MinTimeGapPSFCH-r16": "sl2",
+                      "sl-PSFCH-HopID-r16": 0,
+                      "sl-PSFCH-CandidateResourceType-r16": "startSubCH"
+                    }
+                  }
                 }
               ],
               "sl-TxPoolSelectedNormal-r16": [
-                { "sl-ResourcePoolID-r16": 1, "sl-ResourcePool-r16": {
-                  "sl-SubchannelSize-r16": "n10", "sl-StartRB-Subchannel-r16": 0, "sl-NumSubchannel-r16": 5,
-                  "sl-RB-Number-r16": 50,
-                  "sl-TimeResource-r16": [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-                  "sl-PSCCH-Config-r16": { "case": "setup", "setup": {
-                    "sl-TimeResourcePSCCH-r16": "n2", "sl-FreqResourcePSCCH-r16": "n10",
-                    "sl-DMRS-ScrambleID-r16": 0, "sl-NumReservedBits-r16": 2 } },
-                  "sl-PSSCH-Config-r16": { "case": "setup", "setup": {
-                    "sl-PSSCH-DMRS-TimePatternList-r16": [2, 3], "sl-Scaling-r16": "f1" } },
-                  "sl-UE-SelectedConfigRP-r16": {
-                    "sl-RS-ForSensing-r16": "pssch",
-                    "sl-SensingWindow-r16": "ms100",
-                    "sl-SelectionWindowList-r16": [
-                      {"sl-Priority-r16":1,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":2,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":3,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":4,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":5,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":6,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":7,"sl-SelectionWindow-r16":"n20"},
-                      {"sl-Priority-r16":8,"sl-SelectionWindow-r16":"n20"}
+                {
+                  "sl-ResourcePoolID-r16": 1,
+                  "sl-ResourcePool-r16": {
+                    "sl-SubchannelSize-r16": "n10",
+                    "sl-StartRB-Subchannel-r16": 0,
+                    "sl-NumSubchannel-r16": 5,
+                    "sl-RB-Number-r16": 50,
+                    "sl-TimeResource-r16": [
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1,
+                      1
                     ],
-                    "sl-Thres-RSRP-List-r16": [20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20],
-                    "sl-ResourceReservePeriodList-r16": [
-                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms0"},
-                      {"case":"sl-ResourceReservePeriod1-r16","sl-ResourceReservePeriod1-r16":"ms100"}
-                    ]
-                  },
-                  "sl-TxPercentageList-r16": [
-                    {"sl-Priority-r16":1,"sl-TxPercentage-r16":"p50"},
-                    {"sl-Priority-r16":2,"sl-TxPercentage-r16":"p50"},
-                    {"sl-Priority-r16":3,"sl-TxPercentage-r16":"p35"},
-                    {"sl-Priority-r16":4,"sl-TxPercentage-r16":"p35"},
-                    {"sl-Priority-r16":5,"sl-TxPercentage-r16":"p20"},
-                    {"sl-Priority-r16":6,"sl-TxPercentage-r16":"p20"},
-                    {"sl-Priority-r16":7,"sl-TxPercentage-r16":"p20"},
-                    {"sl-Priority-r16":8,"sl-TxPercentage-r16":"p20"}
-                  ],
-                  "sl-PreemptionEnable-r16": "enabled"
-                } }
+                    "sl-PSCCH-Config-r16": {
+                      "case": "setup",
+                      "setup": {
+                        "sl-TimeResourcePSCCH-r16": "n2",
+                        "sl-FreqResourcePSCCH-r16": "n10",
+                        "sl-DMRS-ScrambleID-r16": 0,
+                        "sl-NumReservedBits-r16": 2
+                      }
+                    },
+                    "sl-PSSCH-Config-r16": {
+                      "case": "setup",
+                      "setup": {
+                        "sl-PSSCH-DMRS-TimePatternList-r16": [
+                          2,
+                          3
+                        ],
+                        "sl-Scaling-r16": "f1",
+                        "sl-BetaOffsets2ndSCI-r16": [
+                          0,
+                          2,
+                          4,
+                          6
+                        ]
+                      }
+                    },
+                    "sl-ThreshS-RSSI-CBR-r16": 9,
+                    "sl-TimeWindowSizeCBR-r16": "ms100",
+                    "sl-TimeWindowSizeCR-r16": "ms1000",
+                    "sl-UE-SelectedConfigRP-r16": {
+                      "sl-CBR-PriorityTxConfigList-r16": [
+                        {
+                          "sl-PriorityThreshold-r16": 8,
+                          "sl-DefaultTxConfigIndex-r16": 0,
+                          "sl-CBR-ConfigIndex-r16": 0,
+                          "sl-Tx-ConfigIndexList-r16": [0, 1, 2, 3, 4]
+                        }
+                      ],
+                      "sl-RS-ForSensing-r16": "pssch",
+                      "sl-MultiReserveResource-r16": "enabled",
+                      "sl-SensingWindow-r16": "ms100",
+                      "sl-SelectionWindowList-r16": [
+                        {
+                          "sl-Priority-r16": 1,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 2,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 3,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 4,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 5,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 6,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 7,
+                          "sl-SelectionWindow-r16": "n20"
+                        },
+                        {
+                          "sl-Priority-r16": 8,
+                          "sl-SelectionWindow-r16": "n20"
+                        }
+                      ],
+                      "sl-Thres-RSRP-List-r16": [
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20,
+                        20
+                      ],
+                      "sl-ResourceReservePeriodList-r16": [
+                        {
+                          "case": "sl-ResourceReservePeriod1-r16",
+                          "sl-ResourceReservePeriod1-r16": "ms0"
+                        },
+                        {
+                          "case": "sl-ResourceReservePeriod1-r16",
+                          "sl-ResourceReservePeriod1-r16": "ms100"
+                        }
+                      ]
+                    },
+                    "sl-TxPercentageList-r16": [
+                      {
+                        "sl-Priority-r16": 1,
+                        "sl-TxPercentage-r16": "p50"
+                      },
+                      {
+                        "sl-Priority-r16": 2,
+                        "sl-TxPercentage-r16": "p50"
+                      },
+                      {
+                        "sl-Priority-r16": 3,
+                        "sl-TxPercentage-r16": "p35"
+                      },
+                      {
+                        "sl-Priority-r16": 4,
+                        "sl-TxPercentage-r16": "p35"
+                      },
+                      {
+                        "sl-Priority-r16": 5,
+                        "sl-TxPercentage-r16": "p20"
+                      },
+                      {
+                        "sl-Priority-r16": 6,
+                        "sl-TxPercentage-r16": "p20"
+                      },
+                      {
+                        "sl-Priority-r16": 7,
+                        "sl-TxPercentage-r16": "p20"
+                      },
+                      {
+                        "sl-Priority-r16": 8,
+                        "sl-TxPercentage-r16": "p20"
+                      }
+                    ],
+                    "sl-PreemptionEnable-r16": "enabled",
+                    "sl-PSFCH-Config-r16": {
+                      "case": "setup",
+                      "setup": {
+                        "sl-PSFCH-Period-r16": "sl1",
+                        "sl-PSFCH-RB-Set-r16": [
+                          1,
+                          1,
+                          1,
+                          1,
+                          1,
+                          1,
+                          1,
+                          1,
+                          1,
+                          1,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0,
+                          0
+                        ],
+                        "sl-NumMuxCS-Pair-r16": "n2",
+                        "sl-MinTimeGapPSFCH-r16": "sl2",
+                        "sl-PSFCH-HopID-r16": 0,
+                        "sl-PSFCH-CandidateResourceType-r16": "startSubCH"
+                      }
+                    }
+                  }
+                }
               ]
             }
           }
@@ -105,9 +588,136 @@
       }
     ],
     "sl-UE-SelectedPreConfig-r16": {
+      "sl-CBR-CommonTxConfigList-r16": {
+        "sl-CBR-RangeConfigList-r16": [[20, 40, 60, 80, 100]],
+        "sl-CBR-PSSCH-TxConfigList-r16": [
+          {"sl-CR-Limit-r16": 10000},
+          {"sl-CR-Limit-r16": 6000},
+          {"sl-CR-Limit-r16": 3000},
+          {"sl-CR-Limit-r16": 1200},
+          {"sl-CR-Limit-r16": 500}
+        ]
+      },
       "sl-ReselectAfter-r16": "n5",
-      "sl-ProbResourceKeep-r16": "v0"
+      "sl-ProbResourceKeep-r16": "v0dot8"
     },
-    "sl-MaxCID-r16": 15
+    "sl-MaxCID-r16": 15,
+    "sl-RadioBearerPreConfigList-r16": [
+      {
+        "slrb-Uu-ConfigIndex-r16": 1,
+        "sl-SDAP-Config-r16": {
+          "sl-SDAP-Header-r16": "absent",
+          "sl-DefaultRB-r16": false,
+          "sl-MappedQoS-FlowsList-r16": [
+            {
+              "sl-PQI-r16": {
+                "sl-StandardizedPQI-r16": 58
+              }
+            }
+          ],
+          "sl-CastType-r16": "broadcast"
+        },
+        "sl-PDCP-Config-r16": {
+          "sl-DiscardTimer-r16": "ms100",
+          "sl-PDCP-SN-Size-r16": "len12bits",
+          "sl-OutOfOrderDelivery": "true"
+        }
+      },
+      {
+        "slrb-Uu-ConfigIndex-r16": 2,
+        "sl-SDAP-Config-r16": {
+          "sl-SDAP-Header-r16": "absent",
+          "sl-DefaultRB-r16": false,
+          "sl-MappedQoS-FlowsList-r16": [
+            {
+              "sl-PQI-r16": {
+                "sl-StandardizedPQI-r16": 56
+              }
+            }
+          ],
+          "sl-CastType-r16": "broadcast"
+        },
+        "sl-PDCP-Config-r16": {
+          "sl-DiscardTimer-r16": "ms20",
+          "sl-PDCP-SN-Size-r16": "len12bits",
+          "sl-OutOfOrderDelivery": "true"
+        }
+      },
+      {
+        "slrb-Uu-ConfigIndex-r16": 3,
+        "sl-SDAP-Config-r16": {
+          "sl-SDAP-Header-r16": "present",
+          "sl-DefaultRB-r16": true,
+          "sl-MappedQoS-FlowsList-r16": [
+            {
+              "sl-PQI-r16": {
+                "sl-StandardizedPQI-r16": 23
+              }
+            }
+          ],
+          "sl-CastType-r16": "unicast"
+        },
+        "sl-PDCP-Config-r16": {
+          "sl-DiscardTimer-r16": "ms100",
+          "sl-PDCP-SN-Size-r16": "len12bits",
+          "sl-OutOfOrderDelivery": "true"
+        }
+      }
+    ],
+    "sl-RLC-BearerPreConfigList-r16": [
+      {
+        "sl-RLC-BearerConfigIndex-r16": 1,
+        "sl-ServedRadioBearer-r16": 1,
+        "sl-RLC-Config-r16": {
+          "case": "sl-UM-RLC-r16",
+          "sl-UM-RLC-r16": {
+            "sl-SN-FieldLengthUM-r16": "size6"
+          }
+        },
+        "sl-MAC-LogicalChannelConfig-r16": {
+          "sl-Priority-r16": 4,
+          "sl-PrioritisedBitRate-r16": "kBps64",
+          "sl-BucketSizeDuration-r16": "ms100",
+          "sl-HARQ-FeedbackEnabled-r16": "disabled"
+        }
+      },
+      {
+        "sl-RLC-BearerConfigIndex-r16": 2,
+        "sl-ServedRadioBearer-r16": 2,
+        "sl-RLC-Config-r16": {
+          "case": "sl-UM-RLC-r16",
+          "sl-UM-RLC-r16": {
+            "sl-SN-FieldLengthUM-r16": "size6"
+          }
+        },
+        "sl-MAC-LogicalChannelConfig-r16": {
+          "sl-Priority-r16": 6,
+          "sl-PrioritisedBitRate-r16": "kBps64",
+          "sl-BucketSizeDuration-r16": "ms50",
+          "sl-HARQ-FeedbackEnabled-r16": "disabled"
+        }
+      },
+      {
+        "sl-RLC-BearerConfigIndex-r16": 3,
+        "sl-ServedRadioBearer-r16": 3,
+        "sl-RLC-Config-r16": {
+          "case": "sl-AM-RLC-r16",
+          "sl-AM-RLC-r16": {
+            "sl-SN-FieldLengthAM-r16": "size12",
+            "sl-T-PollRetransmit-r16": "ms45",
+            "sl-PollPDU-r16": "p4",
+            "sl-PollByte-r16": "kB25",
+            "sl-MaxRetxThreshold-r16": "t4"
+          }
+        },
+        "sl-MAC-LogicalChannelConfig-r16": {
+          "sl-Priority-r16": 3,
+          "sl-PrioritisedBitRate-r16": "kBps64",
+          "sl-BucketSizeDuration-r16": "ms100",
+          "sl-HARQ-FeedbackEnabled-r16": "enabled"
+        }
+      }
+    ],
+    "sl-MaxNumConsecutiveDTX-r16": "n8"
   }
 }

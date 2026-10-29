@@ -8,8 +8,8 @@ function s = preconfig(raw)
 %Outputs: s  scalar struct, full Rel-16 SidelinkPreconfigNR-r16 tree. Every OPTIONAL field
 %            carries a "<field>_Present" logical alongside its value.
 %
-%Deliberately not built here (deferred to B9, where +pdcp/+rlc/+sdap own this content):
-%sl-RadioBearerPreConfigList-r16, sl-RLC-BearerPreConfigList-r16, sl-MeasPreConfig-r16.
+%sl-RadioBearerPreConfigList-r16 and sl-RLC-BearerPreConfigList-r16 are built by
+%cfg.slrbPreconfig. Deliberately not built: sl-MeasPreConfig-r16 (no consumer).
 
 freqItems = getOptList(raw, 'sl_PreconfigFreqInfoList_r16');
 if isempty(freqItems)
@@ -64,6 +64,12 @@ else
 end
 
 s.sl_MaxCID_r16 = getOptional(raw, 'sl_MaxCID_r16', 15);   % INTEGER (1..16383), DEFAULT 15
+
+% The bearer lists that configure SDAP, PDCP, RLC and the MAC logical channels. Built by their
+% own module because their enumerated leaves are resolved by the layer that consumes them -- see
+% cfg.slrbPreconfig's header.
+[s.sl_RadioBearerPreConfigList_r16, s.sl_RadioBearerPreConfigList_r16_Present, ...
+ s.sl_RLC_BearerPreConfigList_r16, s.sl_RLC_BearerPreConfigList_r16_Present] = cfg.slrbPreconfig(raw);
 end
 
 % ======================================================================
@@ -195,25 +201,64 @@ if u.sl_ProbResourceKeep_r16_Present, u.sl_ProbResourceKeep_r16 = resolveEnum('s
 [lbl, u.sl_ReselectAfter_r16_Present] = getOptional(raw, 'sl_ReselectAfter_r16', '');
 if u.sl_ReselectAfter_r16_Present, u.sl_ReselectAfter_r16 = resolveEnum('sl-ReselectAfter-r16', lbl); else, u.sl_ReselectAfter_r16 = 0; end
 
-cbrItems = getOptList(raw, 'sl_CBR_CommonTxConfigList_r16');
-u.sl_CBR_CommonTxConfigList_r16_Present = ~isempty(cbrItems);
-if u.sl_CBR_CommonTxConfigList_r16_Present
-    if numel(cbrItems) > 8
-        error('cfg:preconfig:badSize', 'sl-CBR-CommonTxConfigList-r16: SIZE(1..8), got %d entries', numel(cbrItems));
-    end
-    cb = repmat(struct('sl_Priority_r16', 0, 'sl_CBR_r16', 0), 1, numel(cbrItems));
-    for i = 1:numel(cbrItems)
-        cb(i).sl_Priority_r16 = getMandatory(cbrItems{i}, 'sl_Priority_r16');
-        cb(i).sl_CBR_r16      = getMandatory(cbrItems{i}, 'sl_CBR_r16');
-    end
-    u.sl_CBR_CommonTxConfigList_r16 = cb;
-else
-    u.sl_CBR_CommonTxConfigList_r16 = repmat(struct('sl_Priority_r16', 0, 'sl_CBR_r16', 0), 1, 0);
-end
+% SL-CBR-CommonTxConfigList-r16 (TS 38.331 V16.22.0): a SEQUENCE of two lists, despite its name --
+%   sl-CBR-RangeConfigList-r16    SIZE(1..maxCBR-Config-r16 = 8) OF SL-CBR-LevelsConfig-r16, each
+%                                 SIZE(1..maxCBR-Level-r16 = 16) OF SL-CBR-r16 (0..100, steps of 0.01):
+%                                 the ascending upper bounds of the CBR ranges
+%   sl-CBR-PSSCH-TxConfigList-r16 SIZE(1..maxTxConfig-r16 = 64) OF SL-CBR-PSSCH-TxConfig-r16:
+%                                 sl-CR-Limit-r16 (0..10000, steps of 0.0001) and sl-TxParameters-r16
+% Until 2026-10-28 this parsed a made-up SEQUENCE OF {sl-Priority, sl-CBR} (copied from an equally
+% wrong asn1/ reference), so no stored configuration could express a CR limit.
+u.sl_CBR_CommonTxConfigList_r16_Present = isfield(raw, 'sl_CBR_CommonTxConfigList_r16');
+u.sl_CBR_CommonTxConfigList_r16 = buildCbrCommonTxConfigList(getOptional(raw, 'sl_CBR_CommonTxConfigList_r16', struct()));
 
 [u.ul_PrioritizationThres_r16, u.ul_PrioritizationThres_r16_Present] = getOptional(raw, 'ul_PrioritizationThres_r16', 0);   % INTEGER (1..16)
 [u.sl_PrioritizationThres_r16, u.sl_PrioritizationThres_r16_Present] = getOptional(raw, 'sl_PrioritizationThres_r16', 0);   % INTEGER (1..8)
 end
+function c = buildCbrCommonTxConfigList(raw)
+% SPEC: TS 38.331, SL-CBR-CommonTxConfigList-r16
+MAX_CBR_CONFIG = 8; MAX_CBR_LEVEL = 16; MAX_TX_CONFIG = 64; CBR_MAX = 100; CR_LIMIT_MAX = 10000;
+c.sl_CBR_RangeConfigList_r16_Present = isfield(raw, 'sl_CBR_RangeConfigList_r16');
+c.sl_CBR_RangeConfigList_r16 = repmat(struct('sl_CBR_LevelsConfig_r16', zeros(1, 0)), 1, 0);
+if c.sl_CBR_RangeConfigList_r16_Present
+    node = raw.sl_CBR_RangeConfigList_r16;
+    if iscell(node), rows = cellfun(@(x) x(:)', node(:)', 'UniformOutput', false);
+    else, rows = num2cell(node, 2)'; end                   % jsondecode: one row per inner array
+    if numel(rows) < 1 || numel(rows) > MAX_CBR_CONFIG
+        error('cfg:preconfig:badSize', 'sl-CBR-RangeConfigList-r16: SIZE(1..%d), got %d', MAX_CBR_CONFIG, numel(rows));
+    end
+    for i = 1:numel(rows)
+        lv = double(rows{i}(:)');
+        if numel(lv) < 1 || numel(lv) > MAX_CBR_LEVEL || any(lv < 0 | lv > CBR_MAX | mod(lv, 1) ~= 0) || any(diff(lv) <= 0)
+            error('cfg:preconfig:badCbrLevels', 'sl-CBR-RangeConfigList-r16 entry %d: SIZE(1..%d) of ascending SL-CBR-r16 (0..%d), got %s', ...
+                i, MAX_CBR_LEVEL, CBR_MAX, mat2str(lv));
+        end
+        c.sl_CBR_RangeConfigList_r16(i).sl_CBR_LevelsConfig_r16 = lv;
+    end
+end
+items = getOptList(raw, 'sl_CBR_PSSCH_TxConfigList_r16');
+c.sl_CBR_PSSCH_TxConfigList_r16_Present = ~isempty(items);
+c.sl_CBR_PSSCH_TxConfigList_r16 = repmat(struct('sl_CR_Limit_r16_Present', false, 'sl_CR_Limit_r16', 0, ...
+    'sl_TxParameters_r16_Present', false, 'sl_TxParameters_r16', buildPsschTxParameters(defaultPsschTxParamsRaw())), 1, 0);
+if numel(items) > MAX_TX_CONFIG
+    error('cfg:preconfig:badSize', 'sl-CBR-PSSCH-TxConfigList-r16: SIZE(1..%d), got %d', MAX_TX_CONFIG, numel(items));
+end
+for i = 1:numel(items)
+    t = struct();
+    [t.sl_CR_Limit_r16, t.sl_CR_Limit_r16_Present] = getOptional(items{i}, 'sl_CR_Limit_r16', 0);   % INTEGER (0..10000)
+    if t.sl_CR_Limit_r16 < 0 || t.sl_CR_Limit_r16 > CR_LIMIT_MAX || mod(t.sl_CR_Limit_r16, 1) ~= 0
+        error('cfg:preconfig:badCrLimit', 'sl-CR-Limit-r16: INTEGER (0..%d), got %s', CR_LIMIT_MAX, num2str(t.sl_CR_Limit_r16));
+    end
+    t.sl_TxParameters_r16_Present = isfield(items{i}, 'sl_TxParameters_r16');
+    if t.sl_TxParameters_r16_Present
+        t.sl_TxParameters_r16 = buildPsschTxParameters(items{i}.sl_TxParameters_r16);
+    else
+        t.sl_TxParameters_r16 = buildPsschTxParameters(defaultPsschTxParamsRaw());
+    end
+    c.sl_CBR_PSSCH_TxConfigList_r16(i) = t;
+end
+end
+
 function u = defaultUeSelectedConfig()
 u = buildUeSelectedConfig(struct());
 end

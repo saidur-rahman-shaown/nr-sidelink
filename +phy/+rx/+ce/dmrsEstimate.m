@@ -1,4 +1,4 @@
-function [hData, noiseVar] = dmrsEstimate(rxDmrs, refDmrs, dmrsInd, dataInd, nSubcarriers)
+function [hData, noiseVar] = dmrsEstimate(rxDmrs, refDmrs, dmrsInd, dataInd, nSubcarriers, groupSc)
 %dmrsEstimate Channel estimate at the data REs, interpolated from the DM-RS, plus noise variance.
 %Spec:   none. Channel estimation is where a vendor differentiates -- +phy/+rx/CLAUDE.md: "Not
 %        specified anywhere. This is where our performance comes from."
@@ -8,8 +8,21 @@ function [hData, noiseVar] = dmrsEstimate(rxDmrs, refDmrs, dmrsInd, dataInd, nSu
 %        dmrsInd       M-by-2 integer [k l] -- their positions
 %        dataInd       N-by-2 integer [k l] -- the positions to interpolate onto
 %        nSubcarriers  integer -- grid height, for the interpolation domain
+%        groupSc       integer, >=2, OPTIONAL -- estimate the noise (plus interference) variance
+%                      separately per block of groupSc subcarriers, k = 0..groupSc-1,
+%                      groupSc..2*groupSc-1, ... Omitted: one variance for the whole allocation
 %Outputs: hData     N-by-1 complex -- the channel estimate at each data RE
-%         noiseVar  real, >0 -- estimated noise variance per RE
+%         noiseVar  real, >0 -- estimated noise variance per RE: a scalar, or with groupSc an
+%                   N-by-1 vector, the variance of each data RE's block
+%
+%WHY PER BLOCK: a partial collision. In Mode 2 an interferer often overlaps only some of an
+%allocation's sub-channels. One variance for the allocation leaves the collided REs at FULL
+%confidence while they are wrong, and the damage outlives the slot: HARQ combining adds them to
+%the retransmission's clean LLRs and a retransmission that would decode alone fails combined
+%(found by harness.field: a CAM lost at 8.8 and 16.8 dB after a one-sub-channel collision).
+%Estimated per sub-channel, the collided block's variance rises with the interference and its
+%LLRs shrink toward zero -- erasures rather than errors. +harness/+lls/ keeps the scalar: the
+%measured BLER table is defined by it.
 %
 %LEAST SQUARES PER DM-RS RE, THEN NEAREST-DM-RS-SYMBOL IN TIME, LINEAR IN FREQUENCY.
 %------------------------------------------------------------------------------------
@@ -49,6 +62,29 @@ if isempty(diffs)
     noiseVar = eps;
 else
     noiseVar = max(mean(abs(diffs).^2) / 2, eps);
+end
+if nargin >= 6
+    if ~(isscalar(groupSc) && groupSc >= 2 && mod(groupSc, 1) == 0)
+        error('rx:ce:dmrsEstimate:badGroup', 'dmrsEstimate: groupSc must be an integer >= 2');
+    end
+    % The same adjacent-pilot difference, kept only where both pilots are in one block.
+    blkD = []; dd = [];
+    for s = 1:numel(dmrsSymbols)
+        inSym = find(dmrsInd(:, 2) == dmrsSymbols(s));
+        [k, o] = sort(double(dmrsInd(inSym, 1)));
+        h = hLs(inSym(o));
+        b = floor(k / groupSc);
+        same = b(1:end - 1) == b(2:end);
+        d = abs(diff(h)).^2;
+        blkD = [blkD; b(same)]; %#ok<AGROW>
+        dd = [dd; d(same)]; %#ok<AGROW>
+    end
+    blkData = floor(double(dataInd(:, 1)) / groupSc);
+    nvData = repmat(noiseVar, size(dataInd, 1), 1);           % a block with no pair: the global value
+    for b = unique(blkD)'
+        nvData(blkData == b) = max(mean(dd(blkD == b)) / 2, eps);
+    end
+    noiseVar = nvData;
 end
 
 % Interpolate: for each data RE, take the DM-RS symbol nearest in time, then interpolate

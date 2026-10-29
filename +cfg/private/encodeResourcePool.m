@@ -181,7 +181,12 @@ if c.sl_CBR_PriorityTxConfigList_r16_Present
     elems = cell(1, n);
     for i = 1:n
         e = c.sl_CBR_PriorityTxConfigList_r16(i);
-        elems{i} = jsonJoinObj({jsonPair('sl-Priority-r16', jsonencode(e.sl_Priority_r16)), jsonPair('sl-CBR-r16', jsonencode(e.sl_CBR_r16))});
+        ep = {};
+        if e.sl_PriorityThreshold_r16_Present, ep{end+1} = jsonPair('sl-PriorityThreshold-r16', jsonencode(e.sl_PriorityThreshold_r16)); end %#ok<AGROW>
+        if e.sl_DefaultTxConfigIndex_r16_Present, ep{end+1} = jsonPair('sl-DefaultTxConfigIndex-r16', jsonencode(e.sl_DefaultTxConfigIndex_r16)); end %#ok<AGROW>
+        if e.sl_CBR_ConfigIndex_r16_Present, ep{end+1} = jsonPair('sl-CBR-ConfigIndex-r16', jsonencode(e.sl_CBR_ConfigIndex_r16)); end %#ok<AGROW>
+        if e.sl_Tx_ConfigIndexList_r16_Present, ep{end+1} = jsonPair('sl-Tx-ConfigIndexList-r16', ['[' strjoin(arrayfun(@num2str, e.sl_Tx_ConfigIndexList_r16, 'UniformOutput', false), ',') ']']); end %#ok<AGROW>
+        elems{i} = jsonJoinObj(ep);
     end
     pairs{end+1} = jsonPair('sl-CBR-PriorityTxConfigList-r16', jsonJoinArr(elems));
 end

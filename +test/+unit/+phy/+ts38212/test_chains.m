@@ -149,5 +149,46 @@ catch e
     assert(strcmp(e.identifier, 'ts38212:sci12Multiplex:nl2NotSupported'), 'sci12Multiplex: wrong error for NL=2');
 end
 
+%% polar chains round trip at E < N: puncturing and shortening, not only repetition
+% The polar decoder wrapper passed the mother length N where nrPolarDecode takes the rate-matched
+% length E. The frozen sets agree only for E >= N, and every test here used E >= N, so the defect
+% was invisible until SCI-2 failed at MCS 5, 9, 11, 16 and 20 in the full stack (34-40 of 40
+% noise-free decodes). Each case is chosen to land in one branch of clause 5.4.1.1:
+%   E >= N             repetition
+%   E < N, K/E <= 7/16 puncturing
+%   E < N, K/E >  7/16 shortening
+% for both SCI chains, with clean LLRs (negative for a 1).
+rsP = RandStream('mt19937ar', 'Seed', 21);
+A2 = 35; K2 = A2 + 24;                         % SCI-2A payload + CRC24
+A1 = 30; K1 = A1 + 24;
+cases = [130 180 102 120];                     % SCI-2: repetition, puncturing, shortening, shortening
+for E = cases
+    N = phy.lib.ts38212.polarMotherLength(K2, E, 9);
+    for t = 1:5
+        a = rand(rsP, A2, 1) > 0.5;
+        llr = 8 * (1 - 2 * double(phy.ts38212.sci2ChainEncode(a, E)));
+        [b, ok] = phy.ts38212.sci2ChainDecode(llr, A2, 8);
+        assert(ok && isequal(logical(b(:)), a), 'sci2Chain round trip failed at E = %d, N = %d (K/E = %.3f)', E, N, K2 / E);
+    end
+end
+for E = [216 160 100]                          % SCI-1A: repetition/no-op, puncturing, shortening
+    for t = 1:5
+        a = rand(rsP, A1, 1) > 0.5;
+        llr = 8 * (1 - 2 * double(phy.ts38212.sci1aChainEncode(a, E)));
+        [b, ok] = phy.ts38212.sci1aChainDecode(llr, A1, 8);
+        assert(ok && isequal(logical(b(:)), a), 'sci1aChain round trip failed at E = %d (K/E = %.3f)', E, K1 / E);
+    end
+end
+% The wrapper itself, at a punctured length.
+Kp = 40; Ep = 100; Np = phy.lib.ts38212.polarMotherLength(Kp, Ep, 9);
+assert(Ep < Np, 'test setup: this case must be punctured (E < N)');
+msgP = double(rand(rsP, Kp - 24, 1) > 0.5);
+withCrcP = phy.lib.ts38212.dciCrcEncode(logical(msgP), []);
+encP = phy.lib.ts38212.polarEncode(withCrcP, Ep, 9, true);
+rmP = phy.lib.ts38212.polarRateMatch(encP, Kp, Ep, true);
+recP = phy.lib.ts38212.polarDeRateMatch(8 * (1 - 2 * double(rmP(:))), Kp, Np, true);
+decP = phy.lib.ts38212.polarDecode(recP, Kp, Ep, 8, 9, true, 24);
+assert(isequal(logical(decP(:)), withCrcP(:)), 'polarDecode must take E (rate-matched length), not N');
+
 fprintf('test_chains: PASS\n');
 end

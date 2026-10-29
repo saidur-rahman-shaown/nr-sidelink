@@ -1,4 +1,4 @@
-function okByAttempt = linkHarq(lc, snrDb, nAttempts, stream, ch)
+function [okByAttempt, pscchOk] = linkHarq(lc, snrDb, nAttempts, stream, ch)
 %linkHarq One transport block over up to nAttempts transmissions, with soft combining.
 %Spec:   none. The redundancy version sequence is TS 38.321 clause 5.22.1.3.1's; the SOFT
 %        BUFFER is a receiver structure the spec does not describe.
@@ -12,7 +12,9 @@ function okByAttempt = linkHarq(lc, snrDb, nAttempts, stream, ch)
 %                   draw. Making them independent would hand HARQ a diversity gain the Doppler
 %                   does not actually provide at this speed, which is the whole quantity the
 %                   retransmission dimension of the table exists to measure
-%Outputs: okByAttempt  1 x nAttempts logical -- whether the block had decoded by attempt n.
+%Outputs: pscchOk      logical -- whether the FIRST attempt's PSCCH was found by the blind search
+%                      (the control channel of the same slot, so no extra simulation)
+%         okByAttempt  1 x nAttempts logical -- whether the block had decoded by attempt n.
 %                      Cumulative: once true it stays true, because a receiver that has already
 %                      decoded does not un-decode
 %
@@ -48,6 +50,7 @@ for a = 1:nAttempts
     rv = rvSequence(mod(a - 1, numel(rvSequence)) + 1);
     r  = harness.lls.linkSlot(lc, snrDb, stream, rv, tbBits, chArg);
     tbBits = r.tbBits;
+    if a == 1, pscchOk = r.pscchOk; end
     if ~decoded
         % The decoder accumulates into its own soft buffer across calls, so each attempt is
         % decoded against everything heard so far rather than on its own.

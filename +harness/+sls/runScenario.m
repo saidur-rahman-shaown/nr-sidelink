@@ -1,4 +1,4 @@
-function [kpi, ue, scen] = runScenario(scen, nSlots)
+function [kpi, ue, scen, resolved] = runScenario(scen, nSlots)
 %runScenario Execute a PREPARED scenario and return its KPIs.
 %Spec:   none -- the simulator's top level.
 %Inputs: scen    from +harness/+sls/scenarioInit, optionally edited first
@@ -6,6 +6,9 @@ function [kpi, ue, scen] = runScenario(scen, nSlots)
 %Outputs: kpi   from +harness/kpiReport
 %         ue    final per-UE state, for inspection
 %         scen  the scenario, including its advanced RNG stream
+%         resolved  every terminal +sap/ context, with its full timestamp trail. The KPIs are
+%                   summaries; this is the evidence behind them, and the only way to ask why a
+%                   particular packet expired rather than how many did
 %
 %Split from +harness/+sls/run so a caller can change the scenario before running it -- widen
 %the UE spacing, move a UE, alter the policy. Without this seam every scenario variation would

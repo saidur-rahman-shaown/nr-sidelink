@@ -1,4 +1,4 @@
-function bits = polarDecode(llrN, K, N, listSize, nMax, iIL, crcLen)
+function bits = polarDecode(llrN, K, E, listSize, nMax, iIL, crcLen)
 %polarDecode Polar successive-cancellation-list decoding. Toolbox body: nrPolarDecode.
 %Spec:   the inverse of TS 38.212 V16.15.0 clause 5.3.1 (polar encoding), with the CRC of
 %        clause 5.1 / 7.3.2 used as the list-selection criterion. Decoding is NOT normative --
@@ -12,8 +12,15 @@ function bits = polarDecode(llrN, K, N, listSize, nMax, iIL, crcLen)
 %                  SCI-2 uses true (clause 5.4.1 with IBIL=1) -- and folding it in here would
 %                  hide a per-channel parameter inside a generic decoder
 %        K         positive integer -- information block length INCLUDING its CRC bits
-%        N         positive integer -- mother-code length, from
-%                  phy.lib.ts38212.polarMotherLength(K, E, nMax)
+%        E         positive integer -- the RATE-MATCHED length, the number of bits actually
+%                  transmitted. NOT the mother-code length N: nrPolarDecode takes E (its help,
+%                  "E - Rate-matched output length in bits") and derives N itself, because the
+%                  frozen set depends on E -- clause 5.3.1.2 adds the punctured or shortened
+%                  positions of clause 5.4.1.1 to it whenever E < N. This took N until
+%                  2026-10-28: with E >= N (repetition) the two frozen sets coincide, so every
+%                  test passed; with E < N the decoder froze a different set from the encoder and
+%                  failed on clean input. SCI-2 hit that at MCS 5, 9, 11, 16 and 20 (34-40 of 40
+%                  noise-free decodes failed), which stopped the PSSCH being decoded at all.
 %        listSize  integer, one of {1,2,4,8} -- SCL list size. A decoder tuning knob, not a
 %                  spec quantity: 8 is the conventional operating point
 %        nMax      integer, 9 or 10 -- n_max, clause 5.3.1's mother-code cap. 9 for uplink and
@@ -48,11 +55,12 @@ end
 if ~any(crcLen == [6 11 24])
     error('lib:ts38212:polarDecode:badCrcLen', 'polarDecode: crcLen must be 6, 11 or 24, got %s', num2str(crcLen));
 end
+N = phy.lib.ts38212.polarMotherLength(K, E, nMax);
 if numel(llrN) ~= N
     error('lib:ts38212:polarDecode:badLlrLength', 'polarDecode: llrN must be N=%d long (run polarDeRateMatch first), got %d', N, numel(llrN));
 end
 
 % E = N here: the sequence is already back on the mother code, so no further rate
 % recovery is wanted from the list decoder.
-bits = int8(nrPolarDecode(double(llrN(:)), K, N, listSize, nMax, iIL, crcLen));
+bits = int8(nrPolarDecode(double(llrN(:)), K, E, listSize, nMax, iIL, crcLen));
 end

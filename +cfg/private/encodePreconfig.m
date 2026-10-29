@@ -45,6 +45,7 @@ if s.sl_RoHC_Profiles_r16_Present
 end
 
 pairs{end+1} = jsonPair('sl-MaxCID-r16', jsonencode(s.sl_MaxCID_r16));
+pairs = [pairs, encodeSlrbPreconfig(s)];
 
 txt = jsonJoinObj(pairs);
 end
@@ -86,13 +87,25 @@ end
 if u.sl_ProbResourceKeep_r16_Present, pairs{end+1} = jsonPair('sl-ProbResourceKeep-r16', jsonencode(unresolveEnum('sl-ProbResourceKeep-r16', u.sl_ProbResourceKeep_r16))); end
 if u.sl_ReselectAfter_r16_Present, pairs{end+1} = jsonPair('sl-ReselectAfter-r16', jsonencode(unresolveEnum('sl-ReselectAfter-r16', u.sl_ReselectAfter_r16))); end
 if u.sl_CBR_CommonTxConfigList_r16_Present
-    n = numel(u.sl_CBR_CommonTxConfigList_r16);
-    elems = cell(1, n);
-    for i = 1:n
-        e = u.sl_CBR_CommonTxConfigList_r16(i);
-        elems{i} = jsonJoinObj({jsonPair('sl-Priority-r16', jsonencode(e.sl_Priority_r16)), jsonPair('sl-CBR-r16', jsonencode(e.sl_CBR_r16))});
+    cc = u.sl_CBR_CommonTxConfigList_r16;
+    cp = {};
+    if cc.sl_CBR_RangeConfigList_r16_Present
+        rl = cellfun(@(v) ['[' strjoin(arrayfun(@num2str, v, 'UniformOutput', false), ',') ']'], ...
+            {cc.sl_CBR_RangeConfigList_r16.sl_CBR_LevelsConfig_r16}, 'UniformOutput', false);   % always an array
+        cp{end+1} = jsonPair('sl-CBR-RangeConfigList-r16', jsonJoinArr(rl));
     end
-    pairs{end+1} = jsonPair('sl-CBR-CommonTxConfigList-r16', jsonJoinArr(elems));
+    if cc.sl_CBR_PSSCH_TxConfigList_r16_Present
+        el = cell(1, numel(cc.sl_CBR_PSSCH_TxConfigList_r16));
+        for i = 1:numel(el)
+            t = cc.sl_CBR_PSSCH_TxConfigList_r16(i);
+            tp = {};
+            if t.sl_CR_Limit_r16_Present, tp{end+1} = jsonPair('sl-CR-Limit-r16', jsonencode(t.sl_CR_Limit_r16)); end %#ok<AGROW>
+            if t.sl_TxParameters_r16_Present, tp{end+1} = jsonPair('sl-TxParameters-r16', encodePsschTxParameters(t.sl_TxParameters_r16)); end %#ok<AGROW>
+            el{i} = jsonJoinObj(tp);
+        end
+        cp{end+1} = jsonPair('sl-CBR-PSSCH-TxConfigList-r16', jsonJoinArr(el));
+    end
+    pairs{end+1} = jsonPair('sl-CBR-CommonTxConfigList-r16', jsonJoinObj(cp));
 end
 if u.ul_PrioritizationThres_r16_Present, pairs{end+1} = jsonPair('ul-PrioritizationThres-r16', jsonencode(u.ul_PrioritizationThres_r16)); end
 if u.sl_PrioritizationThres_r16_Present, pairs{end+1} = jsonPair('sl-PrioritizationThres-r16', jsonencode(u.sl_PrioritizationThres_r16)); end

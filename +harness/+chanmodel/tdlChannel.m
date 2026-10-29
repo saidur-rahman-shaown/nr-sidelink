@@ -10,9 +10,13 @@ function ch = tdlChannel(profile, delaySpreadNs, speedKmh, fcHz, sampleRate, see
 %                       the wrong one for an obstructed city street
 %        delaySpreadNs  real, >0 -- RMS delay spread in nanoseconds. ~100 ns is the usual V2V
 %                       figure; it scales all the tap delays together
-%        speedKmh       real, >=0 -- RELATIVE speed of the two vehicles, which is what sets the
-%                       Doppler. Two cars at 60 km/h in the same direction have a relative speed
-%                       near zero and a channel that barely moves; head-on they are at 120
+%        speedKmh       real, >=0 -- the speed that sets the maximum Doppler, f_D = v fc / c.
+%                       For V2V pass |v1| + |v2|, NOT the relative speed: the scatterers are
+%                       static and each moving end adds its own Doppler, so two cars in convoy
+%                       at 60 km/h still see a 120 km/h-equivalent spread on the scattered
+%                       paths. Relative speed governs only the LOS path's mean shift. (This
+%                       line used to say "relative speed"; corrected when harness.field put two
+%                       same-direction vehicles on one link and gave them a frozen channel.)
 %        fcHz           real, >0 -- carrier frequency, for the Doppler shift
 %        sampleRate     real, >0 -- must match phy.lib.ofdmMod's output rate
 %        seed           integer -- so a run reproduces exactly
@@ -27,7 +31,7 @@ function ch = tdlChannel(profile, delaySpreadNs, speedKmh, fcHz, sampleRate, see
 %destructively, so the channel varies across FREQUENCY (taps at different delays) and across
 %TIME (Doppler). Both matter here:
 %
-%  * At 5.9 GHz the wavelength is 5.1 cm, so at 120 km/h relative the coherence time is about
+%  * At 5.9 GHz the wavelength is 5.1 cm, so at a 120 km/h Doppler speed the coherence time is about
 %    0.64 ms -- roughly ONE 30 kHz slot. The channel a retransmission sees is largely
 %    independent of the one the first transmission saw, which is where HARQ diversity gain comes
 %    from and which AWGN cannot show at all.

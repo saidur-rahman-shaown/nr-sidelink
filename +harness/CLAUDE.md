@@ -28,7 +28,9 @@ FOR each slot n:
 ```
 
 ## Sub-packages
-`+lls/` full waveform, 1 to 3 UEs. `+sls/` abstracted PHY, many UEs.
+`+lls/` full waveform, 1 to 3 UEs. `+sls/` abstracted PHY, many UEs. `+field/` full stack
+(`+stack/`, every layer from SDAP down) at waveform level for a handful of UEs with real traffic;
+see `FIELD.md`.
 `+chanmodel/` TDL, CDL, and the 37.885 V2V models — **wrapped**, not part of the UE.
 `+mobility/` trajectory generation.
 
@@ -56,6 +58,23 @@ animated scenario view shows per-UE resource occupancy and live PRR.
 - Reaching into module internals for convenience. Every KPI comes from the logging interface,
   never from a peek at private state, or the harness will not survive the port.
 - Channel model wrapped means wrapped. No toolbox call escapes `+chanmodel/`.
+- **The BLER table is cumulative and indexed by attempt, not by RV.** `blerLookup(.., n, ..)` is
+  P(not decoded by attempt n) (`linkHarq`'s `okByAttempt`). The SLS passed `rv + 1`, so with RV
+  sequence [0 2 3 1] the second copy read the three-attempt curve, and it drew each copy
+  independently. Now each receiver counts the copies it HEARD (`ue.heardCnt`, keyed by source,
+  process and NDI, within `rxProcStaleSlots`), and copy n after n-1 failures fails with
+  B(n)/B(n-1). A missed SCI or a half-duplex slot earns no combining history. (Review 2026-10-26.)
+- **Broadcast receive processes go stale after TRIV's reach (32 slots), not a reservation
+  period.** All copies of a broadcast TB are chained to one SCI. With 200 slots, every audible
+  neighbour's undecoded TB held a process, and at 80 UEs the worst receiver held 16 of 16
+  (`ue.rxNoProcess` now counts those drops; `test_sls` asserts zero). Unicast keeps
+  sl-MaxTransNum periods: its NACK retransmissions do land periods later.
+- **Deployment verdicts are per PQI, and flow LCIDs come from the QoS mapping.** `ueStats` once
+  judged every flow against a fixed 90 % and found LCIDs by hard-coded priorities {cam 6, evt 3}
+  that the PQI change (58: priority 4, 56: priority 6) made wrong, so CAM losses read "not
+  sent". Now: 1 - PER of each flow's PQI, 'N/A' with no pairs; LCID via `sdap.sdapTxMap`.
+- `runSim`'s automatic length uses the transmitters' actual UE IDs (offsets depend on the ID),
+  and the SLS bandwidth is `nPrb x 12 x 15 kHz x 2^mu`, not a fixed 30 kHz.
 
 ## Built so far
 The system-level path runs end to end: `+sls/scenarioInit` → `ueInit` → `slotStep` → `run`,
@@ -265,8 +284,10 @@ at the signalled MCS. An earlier version used a flat `sciSinrAdvantageDb = 6` fu
 
 The separate PSCCH SINR is still computed, and is **not** redundant, because *interference*
 differs even when noise does not: an interferer overlapping only part of the PSSCH still covers
-all of the PSCCH's sub-channel, or none of it. Measured: a one-sub-channel interferer aligned
-on the victim's lowest sub-channel gives PSSCH 5.06 dB and PSCCH −3.91 dB.
+all of the PSCCH's sub-channel, or none of it. A one-sub-channel interferer aligned on a
+3-sub-channel victim's lowest sub-channel gives PSSCH 0.72 dB and PSCCH −4.05 dB: the gap tends
+to 10·log10(L_victim). (This read 5.06 vs −3.91 dB while the PSSCH branch scaled interference by
+the victim's width instead of the interferer's; see "Three SLS defects".)
 
 ### The SCI reservation fields are encoded, and sensing is fed from the decode
 `trivEncode`/`frivEncode`/`reservationPeriodIndex` fill SCI-1A's TRIV, FRIV and reservation
@@ -596,3 +617,121 @@ one transport block per period, so worst-case queueing delay is one period. Thre
 while the other two stay at 100% throughout. Nothing about the channel changes across those
 three runs. `runSim` prints offered load against grant capacity every run so an overloaded
 reservation is not mistaken for a bad link — they produce identical PDB expiries in the KPI table.
+
+## `+field/` — the full stack, several UEs, a real channel
+`harness.field.run(fieldConfig())` (or `runField`) moves N `+stack/` UEs along a road, generates
+CAM / DENM / unicast traffic, and is the channel between them: per directed link RMa path loss at
+the current distance, an optional TDL whose time is set to the slot's wall clock (so a link fades
+continuously although it is only exercised when its transmitter speaks), every transmitter
+summed at every receiver, and thermal noise per sample. `report` gives per-flow PRR and latency
+percentiles against the PDB, with packets still in flight at the end excluded, and attributes
+every lost copy to not-sent / half-duplex / collision / radio from the transmit log. `FIELD.md` is
+the walkthrough and the field-by-field configuration reference.
+
+- **Doppler is double mobility.** The TDL speed is |v_i| + |v_j|, not the relative speed: the
+  scatterers are static. `tdlChannel`'s header used to say "relative speed", and with it two
+  same-direction cars got a frozen channel. The measured BLER table's "120 km/h" key is a
+  Doppler speed under this reading.
+- **Latency closes on application timestamps.** Each payload carries an 8-byte application
+  header (packet id, type, origin), so delivery is matched without reading any layer's state.
+- About 22 s of wall clock per second of air time for 5 UEs with fading.
+
+### SLS defects found by the experiment suite, and two additions
+Found while building `+experiments/`; each passed every existing test.
+
+1. **`pdbNotMet` stopped firing after a grant's first period.** `grantMissesPdb` read the next
+   opportunity off `grant.txOppSlot`, which holds the FIRST period's slots only; from the second
+   period on it found nothing, returned "nothing to judge", and clause 5.22.1.2's condition never
+   fired again. It also counted retransmission slots, which cannot carry new data. Measured on a
+   15-UE field: a 20 ms-PDB event flow sharing a 100 ms grant expired 16 of 24 packets without a
+   transmission; after the fix 26 of 26 were delivered inside the PDB. The next usable opportunity
+   is now `txOppSlot(1)` advanced by whole reservation periods, strictly after the current slot.
+2. **`policy.numRetx` changed nothing.** The grant always reserved `sl-MaxNumPerReserve`
+   resources; `numRetx` fed only `slMaxTransNum`, so `simConfig`'s documented knob gave
+   bit-identical runs at 0, 1 and 2. The UE now reserves `min(numRetx + 1, sl-MaxNumPerReserve)`
+   — the UE's choice, since TS 38.331 only allows n2/n3 for the pool field.
+   `phy.rx.policy.resourcePickChained` accepts 1. Defaults (1, n2) draw exactly as before.
+3. **No T2 policy in the SLS.** `stack.txSlot` had `t2MaxMs`; `slotStep` took T2 = remaining PDB
+   unconditionally. For periodic traffic with T2 > P_rsvp_TX, the first resource can land more
+   than one period out, and a grant sized for one period's arrivals then carries a standing
+   one-packet backlog for its whole life: measured 98 ms on every packet of a 50 ms flow where a
+   capped window gives 49.5. `policy.t2MaxMs` (default Inf) now applies the stack's rule, never
+   below T2min.
+
+4. **Interference was scaled by the victim's width.** `slotSinr` weighted each interferer by
+   `nOverlap / L_victim`; an interferer spreads its power over its OWN allocation, so the share in
+   the victim's band is `nOverlap / L_interferer`. Equal widths were unaffected; a narrow
+   interferer on a wide victim was understated by up to 10·log10(L_victim), a wide one on a
+   narrow victim overstated. `test_sls` now checks PSSCH SINR against S / (N + P_k) directly.
+5. **Sensing recorded total power as SL-RSRP.** `sensingDbRecord` was handed the received power
+   over the whole allocation; TS 38.215 5.1.23 defines RSRP per DM-RS resource element, and
+   `sl-Thres-RSRP` is compared against that. The offset is 10·log10(12 × PRBs), 27.8 dB at 50 PRB:
+   every decoded neighbour in a 500 m field looked like an occupant, and the 120-UE field needed
+   ~10 escalation rounds (+30 dB) to undo it. Now per-RE.
+
+Additions: **Poisson arrivals** (`flow.arrival = 'poisson'`, `app.trafficPoisson`; `periodMs` is
+the mean; only Poisson flows draw from the stream, so periodic scenarios are unchanged), and
+**`rxLog.txUe/.rxUe/.airIdx`** so a caller can ask per-receiver questions (latency at one target,
+PRR of collided vs clean transmissions).
+
+## `+deploy/` — continuous time, summed waveforms, real hardware
+`runDeploy` (configured by `deployConfig.m`) is the waveform-level counterpart of `+sls/` for a
+real deployment: UEs dropped as a Poisson point process, **moving** (constant velocity, reflected
+at the field edge), every UE a full `+stack/`. Per slot:
+
+1. each UE's slot IQ goes through **its own transmitter hardware** (`rf.txHardware`, 23 dBm at the
+   antenna port after PA compression);
+2. the workers exchange the transmitted waveforms (`spmdCat`) — each worker permanently owns a
+   subset of UEs and the fading channels into them;
+3. for each receiver, every arrival is scaled by RMa path loss, passed through **its own link's
+   TDL-D channel** (time set to the slot's absolute time, Doppler from |v_i| + |v_j|), delayed by
+   the **propagation delay plus both ends' timing errors** (fractional, FFT phase ramp) and
+   **added** into a continuous two-slot buffer, so a late arrival's tail lands in the next slot;
+4. the sum goes through **the receiver's hardware** (`rf.rxHardware`: thermal noise, LO error,
+   phase noise, IQ imbalance, AGC on the AGC symbol, ADC) and into `stack.rxSlot`.
+
+Interference is never computed by formula: collisions, partial overlaps, PA in-band emission,
+inter-symbol interference beyond the cyclic prefix, AGC near-far and ADC clipping are whatever the
+summed waveform does to the receiver's own channel estimation and decoding. A slot with no arrival
+at a receiver skips the PHY decode (decoding pure noise cannot succeed). `ueStats` gives per-UE and
+per-flow statistics with a likely cause for every loss; `abstractionCheck` recomputes the SLS's
+SINR for every (transmission, listener) pair and sets its predicted decode probability against
+what the waveform decoder did.
+
+- **Random streams belong to UEs and links**, seeded from their identities, so the answer does
+  not depend on how many workers run it.
+- **Cost:** ~4 min of wall clock per simulated second at 12 UEs, ~15 min at ~30 UEs (6 workers);
+  `stack.rxSlot` dominates (24 ms on noise, 143 ms with a TB to decode).
+- **The stack's MAC differs from the SLS's:** SPS is optional (`c.impl.prsvpTxMs`, default 0 =
+  one grant per packet), and there is no re-evaluation/pre-emption and no CBR/CR congestion
+  control (`+stack/CLAUDE.md`). Waveform-vs-SLS KPI
+  differences therefore mix PHY and MAC; `abstractionCheck` isolates the PHY/interference part.
+- **The PDCP receive-reordering hold shows up here and nowhere in the SLS.** A broadcast receiver
+  starts each new source's window below the first SN it hears (TS 38.323 §7.1), so the first event
+  from every source waits t-Reordering (10 ms) — measured: most 20 ms-PDB events of a short run
+  delivered 1–9 ms LATE rather than lost.
+
+### Free-space link and per-speed BLER tables
+`harness.chanmodel.pathlossModel('freespace', ...)` is Friis (exact physics, no recalled fit) for an
+unobstructed field; every model now carries `antennaGainDb`, and `pathloss` returns the **coupling**
+loss (path loss minus the combined antenna gain), so SINR, RSRP, CBR and PSFCH all see the antennas
+with no caller change. `harness.phyabs.blerTableFor(channel, speed)` is the table registry: the
+shipped table for its own key, otherwise a measured table from `+harness/+phyabs/tables/` (written
+by `experiments.measureSpeeds`). An unmeasured key still raises, as before. `pscchBler` takes the
+same optional key, and `slotStep` passes the scenario's.
+
+### Two latency-floor fixes found by the per-packet study (Part A9)
+Both showed up only when 1000 packets of one PQI were sent on an empty channel and every one was
+checked against its PDB.
+
+1. **`pdbNotMet` checked WHEN the next opportunity comes, not whether it has ROOM.** Two events
+   2–4 slots apart: the first selects a grant sized for one SDU, the second cannot fit beside it,
+   and once the first has gone the second has less than T_proc,1 left, so the thrash guard forbids
+   reselecting and it expires. Measured: 3 of 1000 PQI 55 (10 ms) events and 1 of 1000 PQI 57
+   events never sent at no load. `grantMissesPdb` now also fires when the SDUs due before the
+   opportunity after next exceed the grant's TB, but only if the widest grant could carry them,
+   so the reselection cannot thrash. After the fix: 0 of 1000 for every broadcast PQI.
+2. **An SDU could ride an SPS opportunity in its own arrival slot.** T1 >= T_proc,1 floors a new
+   selection only, so a packet arriving onto an existing grant could be "sent" with no time to
+   build the TB, at latencies below T1. `policy.prepSlots` (default 0, unchanged behaviour) holds
+   SDUs younger than that many slots out of the TB in `txPhase`; the study sets it to T_proc,1.

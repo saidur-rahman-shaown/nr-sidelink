@@ -17,7 +17,10 @@ function [rssiW, rssiDbm, nRe] = slRssi(grid, prbStart, prbCount, slotSymbols)
 %        slotSymbols  row vector of integer OFDM symbol indices, 0-BASED, ascending -- ALL
 %                     symbols of the slot that are configured for PSCCH and PSSCH, INCLUDING
 %                     the first one. Do not pre-strip the AGC symbol: see the note below.
-%Outputs: rssiW    real, >=0, W -- the measurement in the clause's own unit, or NaN when absent
+%Outputs: rssiW    real, >=0, W -- the TOTAL received power over the sub-channel's prbCount*12
+%                  subcarriers in one OFDM symbol, linearly averaged over the measured symbols; NaN
+%                  when absent. Range: thermal floor over one sub-channel (about -110 dBm at 10 PRB,
+%                  30 kHz, NF 9 dB) up to the receiver's input limit (about -20 dBm)
 %         rssiDbm  real, dBm -- 10*log10(rssiW) + 30, or NaN when absent. Returned for the same
 %                  reason slRsrp returns it: the sl-ThreshS-RSSI-CBR threshold this feeds
 %                  (clause 5.1.27, via cbr) is configured in dBm, so a caller comparing in the
@@ -27,6 +30,18 @@ function [rssiW, rssiDbm, nRe] = slRssi(grid, prbStart, prbCount, slotSymbols)
 %                  is ABSENT, not zero, and both values are NaN -- this package's interface
 %                  rule, and the case that arises when slotSymbols has a single entry (the AGC
 %                  symbol alone, which the clause excludes, leaving nothing to average).
+%
+%TOTAL OVER THE SUB-CHANNEL, AVERAGED OVER SYMBOLS -- NOT A PER-RE AVERAGE
+%-------------------------------------------------------------------------
+%Clause 5.1.25 is worded exactly as NR carrier RSSI in clause 5.1.3: "the linear average of the
+%total received power (in [W]) observed only in certain OFDM symbols [...], in the measurement
+%bandwidth, over N number of resource blocks". Clause 5.1.3 fixes what that phrase means, because
+%SS-RSRQ = N x SS-RSRP / NR carrier RSSI: RSRP is per RE (clause 5.1.1), so RSSI must be the power
+%of all N resource blocks together, or the ratio would not be dimensionless. "Total received
+%power observed in the configured sub-channel" is therefore the sum over the sub-channel's REs in
+%a symbol, and the "linear average" runs over the symbols. This function averaged per RE until
+%2026-10-28, which read 10*log10(12*prbCount) low (-20.8 dB at 10 PRB) against
+%sl-ThreshS-RSSI-CBR, so a busy sub-channel needed 20.8 dB more power to count as busy.
 %
 %"Starting from the 2nd OFDM symbol" is applied HERE, exactly once. +phy/CLAUDE.md requires
 %naming which side applies a once-only transform, so: this function drops slotSymbols(1) and the
@@ -88,8 +103,8 @@ if isempty(measuredSymbols)
     return;
 end
 
-% Clause 5.1.25: linear average of the TOTAL received power over every RE of the sub-channel in
-% those symbols.
+% Clause 5.1.25 (read with 5.1.3's NR carrier RSSI): the total received power over the
+% sub-channel in each symbol, linearly averaged over those symbols.
 total = 0;
 nRe = 0;
 for li = 1:numel(measuredSymbols)
@@ -100,6 +115,6 @@ for li = 1:numel(measuredSymbols)
         nRe = nRe + 1;
     end
 end
-rssiW = total / nRe;
+rssiW = total / numel(measuredSymbols);
 rssiDbm = 10 * log10(rssiW) + 30;
 end

@@ -81,5 +81,21 @@ catch e
     assert(strcmp(e.identifier, 'ts38211:slPSSCHIndices:notEnoughSCI2REs'), 'slPSSCHIndices: wrong error for impossible Msymb1');
 end
 
+%% data starts at sl-StartSymbol + 1, SCI-2 at the first DM-RS symbol (TS 38.214 8.1.2.1,
+% TS 38.211 8.3.1.5). With DM-RS at {3, 10}, symbols 1-2 outside the PSCCH carry DATA; the old
+% mapping left them empty while the TBS counted them (MCS 27 undecodable for L_subCH >= 2).
+cfgD = struct('startPRB', 0, 'NRB', 20, 'ld', 13, 'dmrsSymbols', [3 10], 'Msymb1', 50, ...
+    'pscchRE', [repmat((0:10*12-1)', 3, 1), repelem((1:3)', 10*12)], 'ptrsRE', [], 'csirsRE', []);
+indD = phy.ts38211.slPSSCHIndices([], cfgD);
+sci2D = indD(1:cfgD.Msymb1, :); dataD = indD(cfgD.Msymb1 + 1:end, :);
+assert(all(sci2D(:, 2) == 3), 'slPSSCHIndices: SCI-2 must start at the first DM-RS symbol (3)');
+assert(dataD(1, 2) == 1 && dataD(1, 1) == 10 * 12, 'slPSSCHIndices: data must start at symbol 1, first RE above the PSCCH');
+assert(nnz(dataD(:, 2) == 1) == 10 * 12 && nnz(dataD(:, 2) == 2) == 10 * 12, ...
+    'slPSSCHIndices: symbols 1 and 2 above the PSCCH (10 PRB) must carry data');
+dmrsD = phy.ts38211.slPSSCHDMRSIndices(0, 20, [3 10]);
+nAll = 20 * 12 * 12;                                          % symbols 1..12
+assert(size(indD, 1) == nAll - size(unique([dmrsD; cfgD.pscchRE], 'rows'), 1), ...   % DM-RS and PSCCH overlap in symbol 3
+    'slPSSCHIndices: every RE of symbols 1..12 not DM-RS or PSCCH must be SCI-2 or data');
+
 fprintf('test_psschMapping: PASS\n');
 end

@@ -39,9 +39,11 @@ function [ue, scen, resolved, air, rxLog, nRlf, nReeval, nPreempt, nCongestionDr
 %visible cause.
 
 codes    = sap.outcomeCodes();
+SC_PER_RB = 12;                               % TS 38.211 4.4.4.1
 resolved = repmat(sap.ctxInit(1, 0, 0, 1, 1, 1, 1, 0, 0), 1, 0);
 nUe      = scen.nUe;
-rxLog    = struct('distM', zeros(1, 0), 'ok', false(1, 0));
+rxLog    = struct('distM', zeros(1, 0), 'ok', false(1, 0), 'txUe', zeros(1, 0), ...
+    'rxUe', zeros(1, 0), 'airIdx', zeros(1, 0));
 nRlf     = 0;
 nReeval  = 0;
 nPreempt = 0;
@@ -56,7 +58,7 @@ if nLog < 0
     air = repmat(rf.toAir(sap.txReqInit(), 1, [0 0]), 1, 0);
     return;                                  % not a pool slot: nothing can happen in it
 end
-periodLogical = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, scen.TmaxPrime);
+periodLogical = grantPeriodSlots(scen);
 
 % ---- 2. APP: generate, and cross the MAC SAP ------------------------------
 % One generator per flow, each on its own logical channel and its own phase. The packet's
@@ -73,7 +75,14 @@ for i = 1:nUe
         if ue(i).flowCount(f) >= fl.nPackets
             continue;              % this generator has produced its quota and has stopped
         end
-        if ~app.trafficPeriodic(nPhys, fl.periodSlots, ue(i).flowOffset(f))
+        % Event-driven flows draw from the scenario's one stream, and ONLY those flows draw, so a
+        % scenario with no Poisson flow consumes exactly the random numbers it always did.
+        if strcmp(fl.arrival, 'poisson')
+            due = app.trafficPoisson(rand(scen.stream), fl.periodSlots);
+        else
+            due = app.trafficPeriodic(nPhys, fl.periodSlots, ue(i).flowOffset(f));
+        end
+        if ~due
             continue;
         end
         c = sap.ctxInit(ue(i).nextPktId, ue(i).srcL2Id, ue(i).dstL2Id, fl.pqi, ...
@@ -192,7 +201,7 @@ for i = 1:nUe
             % control channel's advantage over data is 1.75 to 16 dB depending on the data's
             % MCS -- a spread no single proxy MCS can express, and one that was guessed while
             % the curves were a placeholder.
-            sciBler = harness.phyabs.pscchBler(air(k).mcs, sinrPscchDb(k, i));
+            sciBler = harness.phyabs.pscchBler(air(k).mcs, sinrPscchDb(k, i), scen.channelModel, scen.speedKmh);
             if rand(scen.stream) >= sciBler
                 % ---- SCI-1A decoded: recover the announced reservation -----
                 % Fed to the sensing database from the DECODED fields, not from the
@@ -202,12 +211,40 @@ for i = 1:nUe
                 [nStart1, nStart2] = phy.ts38212.frivDecode(air(k).frivIdx, air(k).LsubCH, ...
                     scen.numSubchannel, scen.maxNumPerReserve);
                 periodMs = scen.reservePeriodListMs(air(k).prsvpTxIdx + 1);
+                % SL-RSRP is a PER-RESOURCE-ELEMENT power (TS 38.215 5.1.23: "the linear average
+                % over the power contributions of the resource elements that carry DM-RS"), and
+                % sl-Thres-RSRP is compared against it. rxPowerDbm is the TOTAL power over the
+                % allocation, 10*log10(12 x PRBs) higher -- 27.8 dB at 50 PRB. Recording the total
+                % made every decoded neighbour in a 500 m field look like an occupant and forced
+                % ~10 threshold escalations (+30 dB) at 120 UEs to undo the offset.
+                rsrpDbm = rxPowerDbm(k, i) - 10 * log10(SC_PER_RB * air(k).LsubCH * scen.subchSizeRb);
                 ue(i).db = phy.ts38214.sensingDbRecord(ue(i).db, nLog, x, air(k).LsubCH, ...
-                    air(k).prioTx, rxPowerDbm(k, i), periodMs > 0, periodMs, ...
+                    air(k).prioTx, rsrpDbm, periodMs > 0, periodMs, ...
                     nRes, t1, t2, nStart1, nStart2);
 
-                tbBler = harness.phyabs.blerLookup(air(k).mcs, sinrDb(k, i), air(k).rv + 1, ...
+                % HARQ attempt as THIS receiver counts it: the copies of this TB it has heard (SCI
+                % decoded, not half duplex), keyed by (source, process, NDI) within the receive-process lifetime
+                % (scen.rxProcStaleSlots: TRIV's reach for broadcast, sl-MaxTransNum periods unicast).
+                % Not rv + 1: with RV sequence [0 2 3 1] the second transmission carries RV 2 and
+                % read the three-attempt curve (BUGS_TO_ADDRESS BUG-01). The table is CUMULATIVE
+                % (blerSweep: P(not decoded by attempt n), harness.lls.linkHarq), so attempt n
+                % after n-1 failures fails with B(n)/B(n-1), not with B(n).
+                src = air(k).srcL2Id; hp = air(k).harqId + 1;
+                if ue(i).heardNdi(src, hp) == air(k).ndi && nLog - ue(i).heardSlot(src, hp) <= scen.rxProcStaleSlots
+                    ue(i).heardCnt(src, hp) = ue(i).heardCnt(src, hp) + 1;
+                else
+                    ue(i).heardCnt(src, hp) = 1;
+                end
+                ue(i).heardNdi(src, hp) = air(k).ndi;
+                ue(i).heardSlot(src, hp) = nLog;
+                attempt = ue(i).heardCnt(src, hp);
+                tbBler = harness.phyabs.blerLookup(air(k).mcs, sinrDb(k, i), attempt, ...
                     scen.channelModel, scen.speedKmh);
+                if attempt > 1
+                    prevBler = harness.phyabs.blerLookup(air(k).mcs, sinrDb(k, i), attempt - 1, ...
+                        scen.channelModel, scen.speedKmh);
+                    tbBler = min(1, tbBler / max(prevBler, eps));
+                end
                 gotTb = rand(scen.stream) >= tbBler;
 
                 % ---- the REAL MAC receive path, TS 38.321 clause 5.22.2 ----
@@ -237,6 +274,9 @@ for i = 1:nUe
                 % BEFORE" as well as now. Suppressing the duplicate without this makes the
                 % transmitter see a DTX and retransmit what the receiver already has -- and
                 % clause 5.22.1.3.3 counts consecutive DTX toward radio link failure.
+                if strcmp(dropWhy, 'noProcess')
+                    ue(i).rxNoProcess = ue(i).rxNoProcess + 1;     % every receive process busy
+                end
                 if strcmp(dropWhy, 'duplicate')
                     fb = mac.harqRxDuplicateFeedback(air(k).castType, air(k).harqFeedbackEnabled == 1);
                 end
@@ -276,14 +316,12 @@ for i = 1:nUe
                         'startSubch', air(k).startSubch, ...
                         'srcL1Id',    mod(air(k).srcL2Id, 256));
                 end
-                rxLog.distM(end + 1) = dist;
-                rxLog.ok(end + 1)    = gotTb;
+                rxLog = logPair(rxLog, dist, gotTb, air(k).ueId, i, k);
                 break;                     % this position's hypothesis is spent
             end
             % Control lost. Still a link that existed and failed, so it belongs in the pair
             % statistic's denominator.
-            rxLog.distM(end + 1) = dist;
-            rxLog.ok(end + 1)    = false;
+            rxLog = logPair(rxLog, dist, false, air(k).ueId, i, k);
         end
     end
 end
@@ -337,6 +375,18 @@ for i = 1:nUe
     nPreempt = nPreempt + nP;
     [ue(i), scen] = macPhase(ue(i), scen, nLog, periodLogical);
 end
+end
+
+% =========================================================================
+function rxLog = logPair(rxLog, dist, ok, txUe, rxUe, airIdx)
+%logPair One (transmission, hearing receiver) outcome. The identities and the index into this
+%slot's `air` let a caller ask per-receiver questions -- latency at one target UE, PRR of
+%collided against clean transmissions -- that the distance-only record cannot answer.
+rxLog.distM(end + 1)  = dist;
+rxLog.ok(end + 1)     = ok;
+rxLog.txUe(end + 1)   = txUe;
+rxLog.rxUe(end + 1)   = rxUe;
+rxLog.airIdx(end + 1) = airIdx;
 end
 
 % =========================================================================
@@ -601,6 +651,24 @@ end
 % =========================================================================
 function [u, t, sent, dropped] = txPhase(u, scen, nPhys, nLog, periodLogical)
 %txPhase Emit this UE's transmission for slot nLog, if its grant has an opportunity here.
+%SDUs queued for fewer than policy.prepSlots slots are held back from this slot's transport block:
+%a TB cannot be built from data that arrived in the slot it is sent in. They are hidden from the
+%queue for the duration of the call and put back, in order, after it -- whatever path it returns by.
+if scen.policy.prepSlots > 0 && ~isempty(u.lch.q)
+    young = double([u.lch.q.tGenSlot]) > nPhys - scen.policy.prepSlots;
+    if any(young)
+        heldQ = u.lch.q(young); heldL = u.lch.qLch(young);
+        u.lch.q = u.lch.q(~young); u.lch.qLch = u.lch.qLch(~young);
+        [u, t, sent, dropped] = txPhaseCore(u, scen, nPhys, nLog, periodLogical);
+        u.lch.q = [u.lch.q heldQ]; u.lch.qLch = [u.lch.qLch heldL];
+        return;
+    end
+end
+[u, t, sent, dropped] = txPhaseCore(u, scen, nPhys, nLog, periodLogical);
+end
+
+function [u, t, sent, dropped] = txPhaseCore(u, scen, nPhys, nLog, periodLogical)
+%txPhaseCore The transmission itself; see txPhase.
 t       = sap.txReqInit();
 sent    = false;
 dropped = false;
@@ -919,9 +987,15 @@ end
 [remLogical, ~] = phy.rx.policy.pdbLogicalSlots(scen.logicalOfPhys, ...
     mod(harness.sls.slotToPhysical(scen, nLog), numel(scen.logicalOfPhys)), remPhys);
 
-[lo, hi] = mac.creselCounterRange(scen.policy.prsvpTxMs);
-counter  = lo + floor(rand(scen.stream) * (hi - lo + 1));
-cresel   = mac.cresel(counter, true);
+% P_rsvp_TX = 0 is the aperiodic case: a one-shot grant for a single MAC PDU, no
+% SL_RESOURCE_RESELECTION_COUNTER (clause 5.22.1.3.1a) and C_resel = 1 (TS 38.214 8.1.4).
+isPer = scen.policy.prsvpTxMs > 0;
+counter = 0;
+if isPer
+    [lo, hi] = mac.creselCounterRange(scen.policy.prsvpTxMs);
+    counter  = lo + floor(rand(scen.stream) * (hi - lo + 1));
+end
+cresel   = mac.cresel(counter, isPer);
 % Size the grant. Clause 5.22.1.1 selects "an amount of frequency resources" and leaves the
 % amount to the UE, so this is a policy choice, and it is the larger of two numbers:
 %
@@ -944,6 +1018,14 @@ nSdu      = numel(u.lch.q);
 nowBytes  = scen.macOverheadFixedBytes + nSdu * scen.macOverheadPerSduBytes + sum(avail);
 perPeriod = scen.macOverheadFixedBytes;
 for f = 1:scen.nFlow
+    % policy.sizeEventFlows = false leaves Poisson flows out of the persistent size: ceil() would
+    % reserve a whole event SDU EVERY period for a flow that arrives in a fraction of them (a 500 ms
+    % mean against 100 ms periods reserves 5x its load). An event then rides the grant if it fits,
+    % or triggers clause 5.22.1.2 (pdbNotMet / cannot accommodate) and a reselection sized for the
+    % queue at that moment.
+    if strcmp(scen.flows(f).arrival, 'poisson') && ~scen.policy.sizeEventFlows
+        continue;
+    end
     nArrive   = ceil(scen.policy.prsvpTxMs / scen.flows(f).periodMs);
     perPeriod = perPeriod + nArrive * (scen.macOverheadPerSduBytes + scen.flows(f).sizeBytes);
 end
@@ -952,6 +1034,12 @@ pduBytes = min(scen.maxTbsBytes, max(nowBytes, perPeriod));
 if ~feasible
     return;
 end
+% UE latency policy (policy.t2MaxMs): shrink T2 toward T2min, the same rule stack.txSlot applies.
+% Legal in both branches of TS 38.214 8.1.4 -- never below T2min, and when T2min exceeds the
+% remaining PDB the cap does too, leaving T2 at the PDB. candidateSet re-checks the bounds.
+T2minSlots = scen.pool.T2minRaw * 2^scen.mu;
+capSlots   = max(T2minSlots, floor(scen.policy.t2MaxMs * scen.slotsPerMs));
+req.T2     = max(req.T1, min(req.T2, capSlots));
 
 [candY, candX, survivor] = phy.ts38214.candidateSet(req, scen.numSubchannel, ...
     scen.pool.sensingWindowMs, scen.mu, u.db, scen.pool.thresholdListDbm, scen.pool.txPercentage, ...
@@ -961,15 +1049,21 @@ end
 % TS 38.214 clause 8.1.5. Drawing them independently over a selection window hundreds of slots
 % wide, as this loop did before the SCI fields were encoded, produces a grant no conformant UE
 % could announce, and nothing notices while the SCI is never built.
-draws  = rand(scen.stream, 1, scen.maxNumPerReserve);
+% HOW MANY resources per period is the UE's choice, bounded by sl-MaxNumPerReserve (TS 38.331:
+% n2 or n3 only, so the pool cannot express "no retransmission"). policy.numRetx is that choice.
+% It used to be read only into slMaxTransNum, so the knob documented in simConfig as "blind
+% retransmissions beyond the initial transmission" changed nothing: a 0/1/2 sweep gave
+% bit-identical runs. With the defaults (numRetx 1, n2) N = 2 and the draws are unchanged.
+nReserve = min(scen.policy.numRetx + 1, scen.maxNumPerReserve);
+draws  = rand(scen.stream, 1, nReserve);
 % The minimum time gap binds at selection too, not only at replacement: clause 5.22.1.1 states
 % it for "a selected sidelink grant" generally.
 minGap = phy.rx.policy.minResourceGapSlots(nLog, scen.slPsfchPeriod, scen.minTimeGapPsfch, ...
     scen.policy.psfchProcSlots);
 [slots, subch] = phy.rx.policy.resourcePickChained(candY, candX, survivor, draws, ...
-    scen.maxNumPerReserve, minGap);
+    nReserve, minGap);
 
-u.grant         = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, true, counter);
+u.grant         = mac.grantSelect(u.grant, slots, subch, req.LsubCH, scen.policy.prsvpTxMs, isPer, counter);
 u.periodIdx     = 0;
 u.periodRefSlot = slots(1);
 end
@@ -1033,9 +1127,19 @@ misses = false;
 if ~u.grant.hasGrant || isempty(u.lch.q) || isempty(u.grant.txOppSlot)
     return;
 end
-ahead = u.grant.txOppSlot(u.grant.txOppSlot >= nLog);
-if isempty(ahead)
-    return;                  % no opportunity left to judge; the period logic owns this grant
+% The next opportunity that can carry NEW data: only the initial transmission (opportunity 1)
+% builds a fresh MAC PDU (txPhase), and it RECURS every reservation period. txOppSlot holds the
+% first period's slots only, so reading "ahead" off it directly -- as this did -- found nothing
+% from the second period on, returned "nothing to judge", and the condition never fired again:
+% measured on a 15-UE field, a 20 ms-PDB event flow sharing a 100 ms grant expired 16 of 24
+% packets without ever being transmitted. TX has already run in slot nLog, so the next usable
+% opportunity is strictly after it.
+periodLogical = grantPeriodSlots(scen);
+t1 = u.grant.txOppSlot(1);
+if nLog < t1
+    ahead = t1;
+else
+    ahead = t1 + (floor((nLog - t1) / periodLogical) + 1) * periodLogical;
 end
 % Deadlines are PHYSICAL (tGenSlot is), the grant is LOGICAL, so the comparison is done in
 % logical slots -- the same conversion phy.rx.policy.pdbLogicalSlots makes for the window.
@@ -1059,6 +1163,46 @@ if remLogical < phy.ts38214.procTimeSelection(scen.mu)
     return;
 end
 misses = (ahead(1) - nLog) > remLogical;
+if misses
+    return;
+end
+% The opportunity is in time, but is it big enough? Everything whose deadline falls before the
+% opportunity AFTER `ahead` has to leave in `ahead`'s one transport block. The grant was sized when
+% it was selected, so an SDU that arrived since -- a second event two slots after the first -- may
+% not fit beside what was already pending. Unless the grant is replaced now, the first goes out
+% and the second is left with too little budget to reselect (the T_proc,1 guard above) and
+% expires on an otherwise empty channel: measured, 3 of 1000 PQI 55 events at no load. Fired only
+% when a wider grant could carry the lot, or the reselected grant would fail the same test and
+% this would thrash.
+tbsBytes  = scen.tbsBytesByLsubCH(u.grant.lSubch);
+dueBefore = ahead(1) + periodLogical - nLog;         % logical slots from now
+need      = scen.macOverheadFixedBytes;
+for k = 1:numel(u.lch.q)
+    remK = deadPhys(k) - nowPhys - scen.decodeMarginSlots;
+    if remK <= 0
+        continue;
+    end
+    [remLogK, ~] = phy.rx.policy.pdbLogicalSlots(scen.logicalOfPhys, mod(nowPhys, numel(scen.logicalOfPhys)), remK);
+    if remLogK < dueBefore
+        need = need + scen.macOverheadPerSduBytes + double(u.lch.q(k).sizeBytes);
+    end
+end
+misses = need > tbsBytes && need <= scen.maxTbsBytes;
+end
+
+% =========================================================================
+function p = grantPeriodSlots(scen)
+%grantPeriodSlots P'_rsvp_TX in logical slots, or -- for P_rsvp_TX = 0, a one-shot grant that never
+%recurs -- a period longer than any run. Not Inf: the callers form periodIdx * period, and
+%0 * Inf is NaN. With this value a used one-shot grant's next opportunity lies beyond every
+%deadline, so the next packet makes clause 5.22.1.2's "cannot fulfil the remaining PDB" fire and
+%the UE selects again: one selection per packet, which is what aperiodic means.
+APERIODIC_PERIOD_SLOTS = 1e9;
+if scen.policy.prsvpTxMs > 0
+    p = phy.ts38214.reservationPeriodToSlots(scen.policy.prsvpTxMs, scen.TmaxPrime);
+else
+    p = APERIODIC_PERIOD_SLOTS;
+end
 end
 
 % =========================================================================

@@ -73,12 +73,12 @@ assert(cMax.srcL2Id == 2^24 - 1 && cMax.lcid == 63, 'ctxInit: the top of each fi
 % Both read pqiTable's PDB_ms, so a context and phy.rx.policy must never disagree about how
 % much budget a packet has. mu=1: 100 ms is 200 slots.
 t = cfg.pqiTable();
-row = t([t.PQI] == 55);
+row = t([t.PQI] == 58);                     % TS 23.287 Table 5.4.4-1: 100 ms
 cp  = sap.ctxInit(20, 1, 2, row.PQI, row.priority, row.PDB_ms, 300, 4, 0);
 [remaining, expired] = phy.rx.policy.remainingPdbSlots(cp.pdbMs, cp.tGenSlot, 0, 1, 0);
 assert(remaining == 200 && ~expired, 'the context PDB and the policy must agree: expected 200 slots, got %d', remaining);
 [~, ~, feasible] = phy.rx.policy.selectionWindow(1, remaining);
-assert(feasible, 'a fresh PQI 55 packet must have a feasible selection window');
+assert(feasible, 'a fresh PQI 58 packet must have a feasible selection window');
 
 fprintf('test_ctx: all assertions passed.\n');
 end

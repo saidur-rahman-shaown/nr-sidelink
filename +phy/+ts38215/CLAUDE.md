@@ -14,7 +14,7 @@ and left one disagreement on record; see the three sections below.
 | Module | Clause | Notes |
 |---|---|---|
 | `slRsrp` | 5.1.22 / 5.1.23 / 5.1.24 | **three variants** — PSBCH-, PSSCH- and PSCCH-DM-RS-based. One definition, differing only in which DM-RS is averaged and in the antenna-port rule. Variant is an explicit input |
-| `slRssi` | 5.1.25 | total received power over a sub-channel, from the 2nd OFDM symbol |
+| `slRssi` | 5.1.25 | total received power over the sub-channel per symbol (not per RE), linearly averaged over the symbols from the 2nd |
 | `cbrWindowSlots` | 5.1.27 | `sl-TimeWindowSizeCBR` + µ → window length `a` |
 | `crWindowSlots` | 5.1.26 NOTE 1 | `sl-TimeWindowSizeCR` + µ → total window `a+b+1` |
 | `cbr` | 5.1.27 | channel busy ratio over its window |
@@ -112,6 +112,11 @@ NOTE 1 constraint `cr` still cannot check is "n+b shall not exceed the last tran
 opportunity of the grant", which needs the grant itself, not just its size.
 
 ## Known traps
+- **SL RSSI is the sub-channel's total power, not a per-RE average.** Clause 5.1.25 is worded as
+  NR carrier RSSI (5.1.3), whose SS-RSRQ = N x SS-RSRP / RSSI makes RSSI the power over all N RBs.
+  `slRssi` averaged per RE until 2026-10-28: 10*log10(12 x sl-SubchannelSize) dB low (-20.8 dB at
+  10 PRB) against sl-ThreshS-RSSI-CBR, so CBR under-read every busy sub-channel. Fixed by user
+  decision ("use the NR one, as the specification defines").
 - **The 2nd-OFDM-symbol rule is applied inside `slRssi`, exactly once.** Clause 5.1.25 measures
   "starting from the 2nd OFDM symbol", so `slRssi` drops `slotSymbols(1)` and the caller must
   not pre-strip it. That symbol is the AGC symbol, which by construction duplicates the symbol
@@ -162,8 +167,9 @@ every expected value is a hand computation rather than a regression capture:
   joint average over all (port, RE) pairs (2.5 W) differ; a single-port uneven-power case
   proving the average is over `|RE|²` and not `|RE|`; the empty-index-set absent case; and
   rejection of a multi-port grid for a variant with no port summation.
-- `slRssi`: an AGC symbol loaded 50× hotter than the rest, so including it gives 26.5 W against
-  the correct 2 W — a 13× error, chosen because this exclusion is easy to drop and easy to
+- `slRssi`: an AGC symbol loaded 50× hotter than the rest, so including it gives 318 W against 24 W
+  (originally written for the per-RE reading: 26.5 W against
+  the correct 2 W) — a 13× error, chosen because this exclusion is easy to drop and easy to
   apply twice. Plus a sub-channel offset case (PRB 2 must read subcarriers 24–35), an
   all-REs-count case (empty REs drag the average down, they are not skipped), and the
   single-symbol region that becomes absent once the rule is applied.

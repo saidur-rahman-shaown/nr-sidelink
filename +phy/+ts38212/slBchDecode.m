@@ -29,7 +29,7 @@ K = MIB_SL_BITS + 24;             % CRC24C
 N = phy.lib.ts38212.polarMotherLength(K, E, 9);
 
 recovered = phy.lib.ts38212.polarDeRateMatch(llr(:), K, N, false);
-withCrc   = phy.lib.ts38212.polarDecode(recovered, K, N, listSize, 9, true, 24);
+withCrc   = phy.lib.ts38212.polarDecode(recovered, K, E, listSize, 9, true, 24);
 [mibBits, err] = phy.lib.ts38212.crcCheck(withCrc, '24C');
 crcOk = (err == 0);
 end
